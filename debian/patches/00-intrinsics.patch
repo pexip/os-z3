@@ -1,0 +1,37 @@
+Description: SSE2 is not universally available on x86_32
+Author: Michael Tautschnig <mt@debian.org>
+Author: Fabian Wolff <fabi.wolff@arcor.de>
+Author: Karo Gyoker <karogyoker2+debbug@gmail.com>
+Last-Update: 2022-10-19
+---
+This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
+Index: z3/CMakeLists.txt
+===================================================================
+--- z3.orig/CMakeLists.txt
++++ z3/CMakeLists.txt
+@@ -282,7 +282,7 @@ endif()
+ # FP math
+ ################################################################################
+ # FIXME: Support ARM "-mfpu=vfp -mfloat-abi=hard"
+-if ((TARGET_ARCHITECTURE STREQUAL "x86_64") OR (TARGET_ARCHITECTURE STREQUAL "i686"))
++if ((TARGET_ARCHITECTURE STREQUAL "x86_64"))
+   if ((CMAKE_CXX_COMPILER_ID MATCHES "GNU") OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang") OR (CMAKE_CXX_COMPILER_ID MATCHES "Intel"))
+     if (CMAKE_CXX_COMPILER_ID MATCHES "Intel")
+       # Intel's compiler requires linking with libiomp5
+Index: z3/src/util/hwf.cpp
+===================================================================
+--- z3.orig/src/util/hwf.cpp
++++ z3/src/util/hwf.cpp
+@@ -53,9 +53,10 @@ Revision History:
+ #endif
+ 
+ #ifdef USE_INTRINSICS
+-#include <emmintrin.h>
++#define SIMDE_ENABLE_NATIVE_ALIASES
++#include <simde/x86/sse2.h>
+ #if defined(_MSC_VER) || defined(__SSE4_1__)
+-#include <smmintrin.h>
++#include <simde/x86/sse4.1.h>
+ #endif
+ #endif
+ 
