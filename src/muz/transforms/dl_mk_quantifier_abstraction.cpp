@@ -46,8 +46,6 @@ namespace datalog {
         qa_model_converter(ast_manager& m):
             m(m), m_old_funcs(m), m_new_funcs(m) {}
 
-        ~qa_model_converter() override {}
-
         model_converter * translate(ast_translation & translator) override {
             return alloc(qa_model_converter, m);
         }
@@ -149,9 +147,6 @@ namespace datalog {
         a(m),
         m_refs(m),
         m_mc(nullptr) {
-    }
-
-    mk_quantifier_abstraction::~mk_quantifier_abstraction() {
     }
 
     func_decl* mk_quantifier_abstraction::declare_pred(rule_set const& rules, rule_set& dst, func_decl* old_p) {

@@ -21,6 +21,7 @@ Revision History:
 
 #include "ast/ast.h"
 #include "ast/ast_pp.h"
+#include "ast/ast_translation.h"
 #include "util/obj_hashtable.h"
 
 namespace recfun {
@@ -48,7 +49,7 @@ namespace recfun {
 
     class replace {
     public:
-        virtual ~replace() {}
+        virtual ~replace() = default;
         virtual void reset() = 0;
         virtual void insert(expr* d, expr* r) = 0;
         virtual expr_ref operator()(expr* e) = 0;
@@ -59,13 +60,18 @@ namespace recfun {
         func_decl_ref       m_pred; //<! predicate used for this case
         expr_ref_vector     m_guards; //<! conjunction that is equivalent to this case
         expr_ref            m_rhs; //<! if guard is true, `f(t1...tn) = rhs` holds
-        def *               m_def; //<! definition this is a part of
-        bool                m_immediate; //<! does `rhs` contain no defined_fun/case_pred?
+        def *               m_def = nullptr;; //<! definition this is a part of
+        bool                m_immediate = false; //<! does `rhs` contain no defined_fun/case_pred?
 
+        case_def(ast_manager& m):
+            m_pred(m),
+            m_guards(m),
+            m_rhs(m)
+        {}
+        
         case_def(ast_manager & m,
                  family_id fid,
                  def * d,
-                 std::string & name,
                  unsigned case_index,
                  sort_ref_vector const & arg_sorts,
                  expr_ref_vector const& guards,
@@ -93,6 +99,7 @@ namespace recfun {
     // closure for computing whether a `rhs` expression is immediate
     struct is_immediate_pred {
         virtual bool operator()(expr * rhs) = 0;
+        virtual ~is_immediate_pred() = default;
     };
 
     class def {
@@ -109,13 +116,14 @@ namespace recfun {
         func_decl_ref       m_decl; //!< generic declaration
         expr_ref            m_rhs;  //!< definition
         family_id           m_fid;
+        bool                m_is_macro;
 
         def(ast_manager &m, family_id fid, symbol const & s, unsigned arity, sort *const * domain, sort* range, bool is_generated);
 
         // compute cases for a function, given its RHS (possibly containing `ite`).
         void compute_cases(util& u, replace& subst, is_immediate_pred &, 
-                           unsigned n_vars, var *const * vars, expr* rhs);
-        void add_case(std::string & name, unsigned case_index, expr_ref_vector const& conditions, expr* rhs, bool is_imm = false);
+                           bool is_macro, unsigned n_vars, var *const * vars, expr* rhs);
+        void add_case(unsigned case_index, expr_ref_vector const& conditions, expr* rhs, bool is_imm = false);
         bool contains_ite(util& u, expr* e); // expression contains a test over a def?
         bool contains_def(util& u, expr* e); // expression contains a def
     public:
@@ -130,6 +138,9 @@ namespace recfun {
 
         bool is_fun_macro() const { return m_cases.size() == 1; }
         bool is_fun_defined() const { return !is_fun_macro(); }
+        bool is_macro() const { return m_is_macro; }
+
+        def* copy(util& dst, ast_translation& tr);
 
     };
     
@@ -138,7 +149,7 @@ namespace recfun {
         friend class util;
         util * u;
         def * d;
-        void set_definition(replace& r, unsigned n_vars, var * const * vars, expr * rhs); // call only once
+        void set_definition(replace& r, bool is_macro, unsigned n_vars, var * const * vars, expr * rhs); // call only once
     public:
         promise_def(util * u, def * d) : u(u), d(d) {}
         promise_def(promise_def const & from) : u(from.u), d(from.d) {}
@@ -155,13 +166,13 @@ namespace recfun {
             mutable scoped_ptr<util> m_util;
             def_map                  m_defs;       // function->def
             case_def_map             m_case_defs;  // case_pred->def
+            bool                     m_has_rec_defs = false;
             
             ast_manager & m() { return *m_manager; }
 
             void compute_scores(expr* e, obj_map<expr, unsigned>& scores);
 
         public:
-            plugin();
             ~plugin() override;
             void finalize() override;
 
@@ -177,24 +188,28 @@ namespace recfun {
         
             func_decl * mk_func_decl(decl_kind k, unsigned num_parameters, parameter const * parameters, 
                                      unsigned arity, sort * const * domain, sort * range) override;
-            
-            promise_def mk_def(symbol const& name, unsigned n, sort *const * params, sort * range, bool is_generated = false);
 
-            promise_def ensure_def(symbol const& name, unsigned n, sort *const * params, sort * range, bool is_generated = false);
+            void get_op_names(svector<builtin_name> & op_names, symbol const & logic) override;
             
-            void set_definition(replace& r, promise_def & d, unsigned n_vars, var * const * vars, expr * rhs);
+            promise_def mk_def(symbol const& name, unsigned n, sort *const * params, sort * range, bool is_generated);
+
+            promise_def ensure_def(symbol const& name, unsigned n, sort *const * params, sort * range, bool is_generated);
             
-            def* mk_def(replace& subst, symbol const& name, unsigned n, sort ** params, sort * range, unsigned n_vars, var ** vars, expr * rhs);
+            void set_definition(replace& r, promise_def & d, bool is_macro, unsigned n_vars, var * const * vars, expr * rhs);
+            
+            def* mk_def(replace& subst, bool is_macro, symbol const& name, unsigned n, sort ** params, sort * range, unsigned n_vars, var ** vars, expr * rhs);
 
             void erase_def(func_decl* f);
 
             bool has_def(func_decl* f) const { return m_defs.contains(f); }
             bool has_defs() const;
+            bool has_rec_defs() const { return m_has_rec_defs; }
             def const& get_def(func_decl* f) const { return *(m_defs[f]); }
             promise_def get_promise_def(func_decl* f) const { return promise_def(&u(), m_defs[f]); }
             def& get_def(func_decl* f) { return *(m_defs[f]); }
-            bool has_case_def(func_decl* f) const { return m_case_defs.contains(f); }
+            bool has_case_def(func_decl* f) const { return m_case_defs.contains(f); }            
             case_def& get_case_def(func_decl* f) { SASSERT(has_case_def(f)); return *(m_case_defs[f]); }
+            bool is_defined(func_decl* f) {return has_case_def(f) && !get_def(f).get_cases().empty(); }
 
             func_decl_ref_vector get_rec_funs() {
                 func_decl_ref_vector result(m());
@@ -203,6 +218,8 @@ namespace recfun {
             }
 
             expr_ref redirect_ite(replace& subst, unsigned n, var * const* vars, expr * e);
+
+            void inherit(decl_plugin* other, ast_translation& tr) override;
 
         };
     }
@@ -216,11 +233,10 @@ namespace recfun {
         decl::plugin *          m_plugin;
 
         bool compute_is_immediate(expr * rhs);
-        void set_definition(replace& r, promise_def & d, unsigned n_vars, var * const * vars, expr * rhs);
+        void set_definition(replace& r, promise_def & d, bool is_macro, unsigned n_vars, var * const * vars, expr * rhs);
 
     public:
         util(ast_manager &m);
-        ~util();
 
         ast_manager & m() { return m_manager; }
         family_id get_family_id() const { return m_fid; }
@@ -230,11 +246,16 @@ namespace recfun {
         bool is_defined(expr * e) const { return is_app_of(e, m_fid, OP_FUN_DEFINED); }
         bool is_defined(func_decl* f) const { return is_decl_of(f, m_fid, OP_FUN_DEFINED); }
         bool is_generated(func_decl* f) const { return is_defined(f) && f->get_parameter(0).get_int() == 1; }
+        bool is_macro(func_decl* f) { return is_defined(f) && get_def(f).is_macro(); }
         bool is_num_rounds(expr * e) const { return is_app_of(e, m_fid, OP_NUM_ROUNDS); }
         bool owns_app(app * e) const { return e->get_family_id() == m_fid; }
+        bool contains_def(expr* e); // expression contains a def
+
 
         //<! don't use native theory if recursive function declarations are not populated with defs
         bool has_defs() const { return m_plugin->has_defs(); }
+
+        bool has_rec_defs() const { return m_plugin->has_rec_defs(); }
 
         //<! add a function declaration
         def * decl_fun(symbol const & s, unsigned n_args, sort *const * args, sort * range, bool is_generated);
@@ -280,8 +301,6 @@ namespace recfun {
         recfun::def *       m_def;
         expr_ref_vector     m_args;
         case_expansion(recfun::util& u, app * n);
-        case_expansion(case_expansion const & from);
-        case_expansion(case_expansion && from);
         std::ostream& display(std::ostream& out) const;
     };
 
@@ -302,10 +321,6 @@ namespace recfun {
         }
         body_expansion(app_ref & pred, recfun::case_def const & d, expr_ref_vector & args) : 
             m_pred(pred), m_cdef(&d), m_args(args) {}
-        body_expansion(body_expansion const & from): 
-            m_pred(from.m_pred), m_cdef(from.m_cdef), m_args(from.m_args) {}
-        body_expansion(body_expansion && from) : 
-            m_pred(from.m_pred), m_cdef(from.m_cdef), m_args(std::move(from.m_args)) {}
 
         std::ostream& display(std::ostream& out) const;
     };

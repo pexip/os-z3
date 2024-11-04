@@ -7,7 +7,7 @@ if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/database.h")
 endif()
 
 add_custom_command(OUTPUT "database.h"
-  COMMAND "${PYTHON_EXECUTABLE}"
+  COMMAND "${Python3_EXECUTABLE}"
           "${PROJECT_SOURCE_DIR}/scripts/mk_pat_db.py"
           "${CMAKE_CURRENT_SOURCE_DIR}/database.smt2"
           "${CMAKE_CURRENT_BINARY_DIR}/database.h"
@@ -15,7 +15,7 @@ add_custom_command(OUTPUT "database.h"
   DEPENDS "${PROJECT_SOURCE_DIR}/scripts/mk_pat_db.py"
           ${Z3_GENERATED_FILE_EXTRA_DEPENDENCIES}
   COMMENT "Generating \"database.h\""
-  ${ADD_CUSTOM_COMMAND_USES_TERMINAL_ARG}
+  USES_TERMINAL
   VERBATIM
 )
 

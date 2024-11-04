@@ -23,7 +23,7 @@ Revision History:
 --*/
 #include "tactic/tactical.h"
 #include "ast/rewriter/th_rewriter.h"
-#include "tactic/generic_model_converter.h"
+#include "ast/converters/generic_model_converter.h"
 #include "ast/arith_decl_plugin.h"
 #include "ast/expr_substitution.h"
 #include "ast/ast_smt2_pp.h"
@@ -35,7 +35,7 @@ class fix_dl_var_tactic : public tactic {
         struct failed {};
         ast_manager &          m;
         arith_util &           m_util;
-        expr_fast_mark1 *      m_visited;
+        expr_fast_mark1 *      m_visited = nullptr;
         ptr_vector<expr>       m_todo;
         obj_map<app, unsigned> m_occs;
         obj_map<app, unsigned> m_non_nested_occs;
@@ -215,7 +215,7 @@ class fix_dl_var_tactic : public tactic {
         app * operator()(goal const & g) {
             try {
                 expr_fast_mark1 visited;
-                m_visited = &visited;
+                flet<expr_fast_mark1*> _visited(m_visited, &visited);
                 unsigned sz = g.size();
                 for (unsigned i = 0; i < sz; i++) {
                     process(g.form(i));
@@ -300,9 +300,11 @@ public:
         dealloc(m_imp);
     }
 
+    char const* name() const override { return "fix_dl_var"; }
+
     void updt_params(params_ref const & p) override {
-        m_params = p;
-        m_imp->updt_params(p);
+        m_params.append(p);
+        m_imp->updt_params(m_params);
     }
 
     void collect_param_descrs(param_descrs & r) override {

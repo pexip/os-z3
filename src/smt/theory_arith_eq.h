@@ -37,13 +37,12 @@ namespace smt {
             return;
 
         SASSERT(is_fixed(v));
-        // WARNINING: it is not safe to use get_value(v) here, since
+        // WARNING: it is not safe to use get_value(v) here, since
         // get_value(v) may not satisfy v bounds at this point.
         if (!lower_bound(v).is_rational())
             return;
         numeral const & val = lower_bound(v).get_rational();
         value_sort_pair key(val, is_int_src(v));
-        TRACE("arith_eq", tout << mk_pp(get_enode(v)->get_expr(), get_manager()) << " = " << val << "\n";);
         theory_var v2;
         if (m_fixed_var_table.find(key, v2)) {
             if (v2 < static_cast<int>(get_num_vars()) && is_fixed(v2) && lower_bound(v2).get_rational() == val) {
@@ -310,33 +309,28 @@ namespace smt {
             }
             // add new entry
             m_var_offset2row_id.insert(key, rid);
-        }
-        
+        }        
     }
 
 
     template<typename Ext>
     void theory_arith<Ext>::propagate_eq_to_core(theory_var x, theory_var y, antecedents& antecedents) {
         // Ignore equality if variables are already known to be equal.
-        ast_manager& m = get_manager();
-        (void)m;
         if (is_equal(x, y))
             return;
-        // I doesn't make sense to propagate an equality (to the core) of variables of different sort.
-        if (var2expr(x)->get_sort() != var2expr(y)->get_sort()) {
-            TRACE("arith", tout << mk_pp(var2expr(x), m) << " = " << mk_pp(var2expr(y), m) << "\n";);
-            return;
-        }
-        context & ctx      = get_context();
-        region & r         = ctx.get_region();
         enode * _x         = get_enode(x);
         enode * _y         = get_enode(y);
+        // I doesn't make sense to propagate an equality (to the core) of variables of different sort.
+        CTRACE("arith", _x->get_sort() != _y->get_sort(), tout << enode_pp(_x, ctx) << " = " << enode_pp(_y, ctx) << "\n");
+        if (_x->get_sort() != _y->get_sort())
+            return;
+
         eq_vector const& eqs = antecedents.eqs();
         literal_vector const& lits = antecedents.lits();
         justification * js = 
             ctx.mk_justification(
                 ext_theory_eq_propagation_justification(
-                    get_id(), r, 
+                    get_id(), ctx, 
                     lits.size(), lits.data(),
                     eqs.size(), eqs.data(),
                     _x, _y, 
@@ -347,9 +341,9 @@ namespace smt {
               for (literal lit : lits) 
                   ctx.display_detailed_literal(tout, lit) << "\n";
               for (auto const& p : eqs) 
-                  tout << pp(p.first, m) << " = " << pp(p.second, m) << "\n";
+                  tout << enode_pp(p.first, ctx) << " = " << enode_pp(p.second, ctx) << "\n";
               tout << " ==> ";
-              tout << pp(_x, m) << " = " << pp(_y, m) << "\n";);
+              tout << enode_pp(_x, ctx) << " = " << enode_pp(_y, ctx) << "\n";);
         ctx.assign_eq(_x, _y, eq_justification(js));
     }
 };

@@ -16,7 +16,6 @@ Author:
 Notes:
 
 --*/
-#include<iostream>
 #include "api/z3.h"
 #include "api/api_log_macros.h"
 #include "api/api_context.h"
@@ -743,7 +742,7 @@ extern "C" {
         fpa_util & fu = ctx->fpautil();
         if (!ctx->bvutil().is_bv(to_expr(bv)) ||
             !fu.is_float(to_sort(s))) {
-            SET_ERROR_CODE(Z3_INVALID_ARG, "bv sort the flaot sort expected");
+            SET_ERROR_CODE(Z3_INVALID_ARG, "bv sort the float sort expected");
             return nullptr;
         }
         expr * a = fu.mk_to_fp(to_sort(s), to_expr(bv));
@@ -877,7 +876,7 @@ extern "C" {
         CHECK_VALID_AST(s, 0);
         if (!is_fp_sort(c, s)) {
             SET_ERROR_CODE(Z3_INVALID_ARG, "fp sort expected");
-            RETURN_Z3(0);
+            return 0;
         }
         return mk_c(c)->fpautil().get_ebits(to_sort(s));
         Z3_CATCH_RETURN(0);
@@ -891,7 +890,7 @@ extern "C" {
         CHECK_VALID_AST(s, 0);
         if (!is_fp_sort(c, s)) {
             SET_ERROR_CODE(Z3_INVALID_ARG, "fp sort expected");
-            RETURN_Z3(0);
+            return 0;
         }
         return mk_c(c)->fpautil().get_sbits(to_sort(s));
         Z3_CATCH_RETURN(0);
@@ -1023,7 +1022,7 @@ extern "C" {
         if (mpfm.is_inf(val)) mpqm.set(q, 0);
         std::stringstream ss;
         mpqm.display_decimal(ss, q, sbits);
-        return mk_c(c)->mk_external_string(ss.str());
+        return mk_c(c)->mk_external_string(std::move(ss).str());
         Z3_CATCH_RETURN("");
     }
 
@@ -1101,7 +1100,7 @@ extern "C" {
         }
         std::stringstream ss;
         ss << exp;
-        return mk_c(c)->mk_external_string(ss.str());
+        return mk_c(c)->mk_external_string(std::move(ss).str());
         Z3_CATCH_RETURN("");
     }
 

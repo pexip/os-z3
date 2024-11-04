@@ -57,7 +57,7 @@ struct defined_names::impl {
     unsigned_vector m_lims;          //!< Backtracking support.
 
     impl(ast_manager & m, char const * prefix);
-    virtual ~impl();
+    virtual ~impl() = default;
 
     app * gen_name(expr * e, sort_ref_buffer & var_sorts, buffer<symbol> & var_names);
     void cache_new_name(expr * e, app * name);
@@ -90,9 +90,6 @@ defined_names::impl::impl(ast_manager & m, char const * prefix):
         m_z3name = prefix;
 }
 
-defined_names::impl::~impl() {
-}
-
 /**
    \brief Given an expression \c e that may contain free variables, return an application (sk x_1 ... x_n),
    where sk is a fresh variable name, and x_i's are the free variables of \c e.
@@ -114,6 +111,8 @@ app * defined_names::impl::gen_name(expr * e, sort_ref_buffer & var_sorts, buffe
             var_sorts.push_back(s);
         }
         else {
+            domain.push_back(m.mk_bool_sort());
+            new_args.push_back(m.mk_true());
             var_sorts.push_back(m.mk_bool_sort()); // could be any sort.
         }
         var_names.push_back(symbol(i));
@@ -205,7 +204,7 @@ void defined_names::impl::mk_definition(expr * e, app * n, sort_ref_buffer & var
         // the instantiation rules for store(a, i, v) are:
         //     store(a, i, v)[j] = if i = j then v else a[j] with patterns {a[j], store(a, i, v)} { store(a, i, v)[j] }
         // The first pattern is not included.
-        // TBD use a model-based scheme for exracting instantiations instead of
+        // TBD use a model-based scheme for extracting instantiations instead of
         // using multi-patterns.
         // 
 

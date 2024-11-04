@@ -85,14 +85,14 @@ public:
     bool is_scalar() const { return type() == expr_type::SCALAR; }
     virtual bool is_pure_monomial() const { return false; }
     std::string str() const { std::stringstream ss; print(ss); return ss.str(); }
-    virtual ~nex() {}
+    virtual ~nex() = default;
     virtual bool contains(lpvar j) const { return false; }
     virtual unsigned get_degree() const = 0;
     // simplifies the expression and also assigns the address of "this" to *e
     virtual const rational& coeff() const { return rational::one(); }
 
     #ifdef Z3DEBUG
-    virtual void sort() {};
+    virtual void sort() {}
     #endif
     bool virtual is_linear() const = 0;
 };

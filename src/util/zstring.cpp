@@ -42,10 +42,8 @@ bool zstring::is_escape_char(char const *& s, unsigned& result) {
                 result = 16*result + d;
             }
             else if (*(s+3+i) == '}') {
-                if (result > 255 && !uses_unicode())
-                    throw default_exception("unicode characters outside of byte range are not supported");
-                if (result > unicode_max_char()) 
-                    throw default_exception("unicode characters outside of byte range are not supported");
+                if (result > max_char())
+                    return false;
                 s += 4 + i;
                 return true;                
             }
@@ -65,8 +63,8 @@ bool zstring::is_escape_char(char const *& s, unsigned& result) {
         result = 16*result + d2;
         result = 16*result + d3;
         result = 16*result + d4;
-        if (result > unicode_max_char()) 
-            throw default_exception("unicode characters outside of byte range are not supported");
+        if (result > max_char())
+            return false;
         s += 6;
         return true;
     }
@@ -80,21 +78,26 @@ zstring::zstring(char const* s) {
             m_buffer.push_back(ch);
         }
         else {
-            m_buffer.push_back(*s);
+            m_buffer.push_back((unsigned char)*s);
             ++s;
         }
     }
     SASSERT(well_formed());
 }
 
-
-bool zstring::uses_unicode() const {
-    return gparams::get_value("unicode") != "false";
+string_encoding zstring::get_encoding() {
+    if (gparams::get_value("encoding") == "unicode") 
+        return string_encoding::unicode;
+    if (gparams::get_value("encoding") == "bmp") 
+        return string_encoding::bmp;
+    if (gparams::get_value("encoding") == "ascii") 
+        return string_encoding::ascii;
+    return string_encoding::unicode;
 }
 
 bool zstring::well_formed() const {
     for (unsigned ch : m_buffer) {
-        if (ch > unicode_max_char()) {
+        if (ch > max_char()) {
             IF_VERBOSE(0, verbose_stream() << "large character: " << ch << "\n";);
             return false;
         }
@@ -147,9 +150,9 @@ std::string zstring::encode() const {
 #define _flush() if (offset > 0) { buffer[offset] = 0; strm << buffer; offset = 0; }
     for (unsigned i = 0; i < m_buffer.size(); ++i) {
         unsigned ch = m_buffer[i];
-        if (ch < 32 || ch >= 128) {
+        if (ch < 32 || ch >= 128 || ('\\' == ch && i + 1 < m_buffer.size() && 'u' == m_buffer[i+1])) {
             _flush();
-            strm << "\\u{" << std::hex << ch << std::dec << "}";
+            strm << "\\u{" << std::hex << ch << std::dec << '}';
         }
         else {
             if (offset == 99)  
@@ -158,7 +161,7 @@ std::string zstring::encode() const {
         }
     }
     _flush();
-    return strm.str();
+    return std::move(strm).str();
 }
 
 bool zstring::suffixof(zstring const& other) const {
@@ -213,7 +216,7 @@ int zstring::indexofu(zstring const& other, unsigned offset) const {
 int zstring::last_indexof(zstring const& other) const {
     if (other.length() == 0) return length();
     if (other.length() > length()) return -1;
-    for (unsigned last = length() - other.length(); last-- > 0; ) {
+    for (unsigned last = length() - other.length() + 1; last-- > 0; ) {
         bool suffix = true;
         for (unsigned j = 0; suffix && j < other.length(); ++j) {
             suffix = m_buffer[last + j] == other[j];

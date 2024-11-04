@@ -24,11 +24,9 @@ Notes:
 
 
 solver_na2as::solver_na2as(ast_manager & m):
-    m(m), 
+    solver(m), 
     m_assumptions(m) {
 }
-
-solver_na2as::~solver_na2as() {}
 
 void solver_na2as::assert_expr_core2(expr * t, expr * a) {
     if (a == nullptr) {

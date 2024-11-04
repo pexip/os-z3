@@ -52,7 +52,6 @@ namespace smt {
         app * m_parent;
     public:
         and_relevancy_eh(app * p):m_parent(p) {}
-        ~and_relevancy_eh() override {}
         void operator()(relevancy_propagator & rp) override;
     };
 
@@ -60,7 +59,6 @@ namespace smt {
         app * m_parent;
     public:
         or_relevancy_eh(app * p):m_parent(p) {}
-        ~or_relevancy_eh() override {}
         void operator()(relevancy_propagator & rp) override;
     };
 
@@ -68,7 +66,6 @@ namespace smt {
         app * m_parent;
     public:
         ite_relevancy_eh(app * p):m_parent(p) {}
-        ~ite_relevancy_eh() override {}
         void operator()(relevancy_propagator & rp) override;
     };
 
@@ -78,7 +75,6 @@ namespace smt {
         app  * m_else_eq;
     public:
         ite_term_relevancy_eh(app * p, app * then_eq, app * else_eq):m_parent(p), m_then_eq(then_eq), m_else_eq(else_eq) {}
-        ~ite_term_relevancy_eh() override {}
         void operator()(relevancy_propagator & rp) override;
     };
 
@@ -127,18 +123,18 @@ namespace smt {
     }
     
     struct relevancy_propagator_imp : public relevancy_propagator {
-        unsigned                       m_qhead;
+        unsigned                       m_qhead = 0;
         expr_ref_vector                m_relevant_exprs; 
         uint_set                       m_is_relevant;
         typedef list<relevancy_eh *>   relevancy_ehs;
         obj_map<expr, relevancy_ehs *> m_relevant_ehs;
         obj_map<expr, relevancy_ehs *> m_watches[2];
         struct eh_trail {
-            enum kind { POS_WATCH, NEG_WATCH, HANDLER };
+            enum class kind { POS_WATCH, NEG_WATCH, HANDLER };
             kind   m_kind;
             expr * m_node;
-            eh_trail(expr * n):m_kind(HANDLER), m_node(n) {}
-            eh_trail(expr * n, bool val):m_kind(val ? POS_WATCH : NEG_WATCH), m_node(n) {}
+            eh_trail(expr * n):m_kind(kind::HANDLER), m_node(n) {}
+            eh_trail(expr * n, bool val):m_kind(val ? kind::POS_WATCH : kind::NEG_WATCH), m_node(n) {}
             kind get_kind() const { return m_kind; }
             expr * get_node() const { return m_node; }
         };
@@ -148,14 +144,18 @@ namespace smt {
             unsigned m_trail_lim;
         };
         svector<scope>                 m_scopes;
-        bool                           m_propagating;
+        bool                           m_propagating = false;
 
         relevancy_propagator_imp(context & ctx):
-            relevancy_propagator(ctx), m_qhead(0), m_relevant_exprs(ctx.get_manager()),
-            m_propagating(false) {}
+            relevancy_propagator(ctx), m_relevant_exprs(ctx.get_manager()) {}
 
         ~relevancy_propagator_imp() override {
-            undo_trail(0);
+            ast_manager & m = get_manager();
+            unsigned i = m_trail.size();
+            while (i != 0) {
+                --i;
+                m.dec_ref(m_trail[i].get_node());
+            }
         }
 
         relevancy_ehs * get_handlers(expr * n) {
@@ -292,9 +292,9 @@ namespace smt {
                 expr * n = t.get_node();
                 relevancy_ehs * ehs;
                 switch (t.get_kind()) {
-                case eh_trail::POS_WATCH: ehs = get_watches(n, true); SASSERT(ehs); set_watches(n, true, ehs->tail()); break;
-                case eh_trail::NEG_WATCH: ehs = get_watches(n, false); SASSERT(ehs); set_watches(n, false, ehs->tail()); break;
-                case eh_trail::HANDLER:   ehs = get_handlers(n); SASSERT(ehs); set_handlers(n, ehs->tail()); break;
+                case eh_trail::kind::POS_WATCH: ehs = get_watches(n, true); SASSERT(ehs); set_watches(n, true, ehs->tail()); break;
+                case eh_trail::kind::NEG_WATCH: ehs = get_watches(n, false); SASSERT(ehs); set_watches(n, false, ehs->tail()); break;
+                case eh_trail::kind::HANDLER:   ehs = get_handlers(n); SASSERT(ehs); set_handlers(n, ehs->tail()); break;
                 default: UNREACHABLE(); break;
                 }
                 m.dec_ref(n);
@@ -378,9 +378,7 @@ namespace smt {
                 break;
             case l_true: {
                 expr * true_arg = nullptr;
-                unsigned num_args = n->get_num_args();
-                for (unsigned i = 0; i < num_args; i++) {
-                    expr * arg  = n->get_arg(i);
+                for (expr* arg : *n) {
                     if (m_context.find_assignment(arg) == l_true) {
                         if (is_relevant_core(arg))
                             return;
@@ -402,9 +400,7 @@ namespace smt {
             switch (val) {
             case l_false: {
                 expr * false_arg = nullptr;
-                unsigned num_args = n->get_num_args();
-                for (unsigned i = 0; i < num_args; i++) {
-                    expr * arg  = n->get_arg(i);
+                for (expr* arg : *n) {
                     if (m_context.find_assignment(arg) == l_false) {
                         if (is_relevant_core(arg))
                             return; 

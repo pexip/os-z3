@@ -22,7 +22,7 @@ Revision History:
 #include "ast/rewriter/rewriter_def.h"
 #include "ast/ast_pp.h"
 #include "ast/rewriter/expr_safe_replace.h"
-#include "tactic/generic_model_converter.h"
+#include "ast/converters/generic_model_converter.h"
 #include "muz/transforms/dl_mk_interp_tail_simplifier.h"
 #include "muz/base/fp_params.hpp"
 #include "ast/scoped_proof.h"
@@ -145,8 +145,6 @@ namespace datalog {
             m_src(nullptr),
             m_dst(nullptr)
         {}
-
-        ~expand_mkbv_cfg() {}
 
         void set_src(rule_set const* src) { m_src = src; }
         void set_dst(rule_set* dst) { m_dst = dst; }

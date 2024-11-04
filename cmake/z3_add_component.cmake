@@ -116,13 +116,13 @@ macro(z3_add_component component_name)
     set(_full_output_file_path "${CMAKE_CURRENT_BINARY_DIR}/${_output_file}")
     message(STATUS "Adding rule to generate \"${_output_file}\"")
     add_custom_command(OUTPUT "${_output_file}"
-      COMMAND "${PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/pyg2hpp.py" "${_full_pyg_file_path}" "${CMAKE_CURRENT_BINARY_DIR}"
+      COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/pyg2hpp.py" "${_full_pyg_file_path}" "${CMAKE_CURRENT_BINARY_DIR}"
       MAIN_DEPENDENCY "${_full_pyg_file_path}"
       DEPENDS "${PROJECT_SOURCE_DIR}/scripts/pyg2hpp.py"
               ${Z3_GENERATED_FILE_EXTRA_DEPENDENCIES}
       COMMENT "Generating \"${_full_output_file_path}\" from \"${pyg_file}\""
       WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
-      ${ADD_CUSTOM_COMMAND_USES_TERMINAL_ARG}
+      USES_TERMINAL
       VERBATIM
     )
     list(APPEND _list_generated_headers "${_full_output_file_path}")
@@ -206,6 +206,12 @@ macro(z3_add_component component_name)
   foreach (flag ${Z3_COMPONENT_CXX_FLAGS})
     target_compile_options(${component_name} PRIVATE ${flag})
   endforeach()
+  set_target_properties(${component_name} PROPERTIES
+    # Position independent code needed in shared libraries
+    POSITION_INDEPENDENT_CODE ON
+    # Symbol visibility
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON)
 
   # It's unfortunate that we have to manage dependencies ourselves.
   #
@@ -269,7 +275,7 @@ macro(z3_add_install_tactic_rule)
   string(REPLACE ";" "\n" _tactic_header_files "${_tactic_header_files}")
   file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/install_tactic.deps" ${_tactic_header_files})
   add_custom_command(OUTPUT "install_tactic.cpp"
-    COMMAND "${PYTHON_EXECUTABLE}"
+    COMMAND "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/scripts/mk_install_tactic_cpp.py"
     "${CMAKE_CURRENT_BINARY_DIR}"
     "${CMAKE_CURRENT_BINARY_DIR}/install_tactic.deps"
@@ -277,7 +283,7 @@ macro(z3_add_install_tactic_rule)
             ${Z3_GENERATED_FILE_EXTRA_DEPENDENCIES}
             "${CMAKE_CURRENT_BINARY_DIR}/install_tactic.deps"
     COMMENT "Generating \"${CMAKE_CURRENT_BINARY_DIR}/install_tactic.cpp\""
-    ${ADD_CUSTOM_COMMAND_USES_TERMINAL_ARG}
+    USES_TERMINAL
     VERBATIM
   )
   unset(_expanded_components)
@@ -307,7 +313,7 @@ macro(z3_add_memory_initializer_rule)
   endforeach()
 
   add_custom_command(OUTPUT "mem_initializer.cpp"
-    COMMAND "${PYTHON_EXECUTABLE}"
+    COMMAND "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/scripts/mk_mem_initializer_cpp.py"
     "${CMAKE_CURRENT_BINARY_DIR}"
     ${_mem_init_finalize_headers}
@@ -315,7 +321,7 @@ macro(z3_add_memory_initializer_rule)
             ${Z3_GENERATED_FILE_EXTRA_DEPENDENCIES}
             ${_mem_init_finalize_headers}
     COMMENT "Generating \"${CMAKE_CURRENT_BINARY_DIR}/mem_initializer.cpp\""
-    ${ADD_CUSTOM_COMMAND_USES_TERMINAL_ARG}
+    USES_TERMINAL
     VERBATIM
   )
   unset(_mem_init_finalize_headers)
@@ -343,7 +349,7 @@ macro(z3_add_gparams_register_modules_rule)
   unset(_component_register_module_header_files)
 
   add_custom_command(OUTPUT "gparams_register_modules.cpp"
-    COMMAND "${PYTHON_EXECUTABLE}"
+    COMMAND "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/scripts/mk_gparams_register_modules_cpp.py"
     "${CMAKE_CURRENT_BINARY_DIR}"
     ${_register_module_header_files}
@@ -351,7 +357,7 @@ macro(z3_add_gparams_register_modules_rule)
             ${Z3_GENERATED_FILE_EXTRA_DEPENDENCIES}
             ${_register_module_header_files}
     COMMENT "Generating \"${CMAKE_CURRENT_BINARY_DIR}/gparams_register_modules.cpp\""
-    ${ADD_CUSTOM_COMMAND_USES_TERMINAL_ARG}
+    USES_TERMINAL
     VERBATIM
   )
   unset(_expanded_components)

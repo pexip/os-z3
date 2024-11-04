@@ -26,7 +26,7 @@ public:
     
 private:
 #define ARRAY_SIZE_IDX     -1
-    T * m_data;
+    T * m_data = nullptr;
     void destroy_elements() {
         iterator it = begin();
         iterator e  = end();
@@ -36,8 +36,6 @@ private:
     }
 
     char * raw_ptr() const { return reinterpret_cast<char*>(reinterpret_cast<size_t*>(m_data) - 1); }
-
-    array & operator=(array const & source);
 
     void set_data(void * mem, unsigned sz) {
         size_t * _mem = static_cast<size_t*>(mem);
@@ -73,7 +71,7 @@ public:
     typedef T * iterator;
     typedef const T * const_iterator;
 
-    array():m_data(nullptr) {}
+    array() = default;
 
     /**
        \brief Store the array in the given chunk of memory (mem).
@@ -114,6 +112,8 @@ public:
         if (m_data && CallDestructors)
             destroy_elements();
     }
+
+    array & operator=(array const & source) = delete;
 
     // Free the memory used to store the array.
     template<typename Allocator>
@@ -184,7 +184,7 @@ public:
     T const * data() const { return m_data; }
     T * data() { return m_data; }
 
-    void swap(array & other) {
+    void swap(array & other) noexcept {
         std::swap(m_data, other.m_data);
     }
 
@@ -193,7 +193,7 @@ public:
 template<typename T>
 class ptr_array : public array<T *, false> {
 public:
-    ptr_array() {}
+    ptr_array() = default;
     ptr_array(void * mem, unsigned sz, T * const * vs):array<T*, false>(mem, sz, vs) {}
     template<typename Allocator>
     ptr_array(Allocator & a, unsigned sz, T * const * vs):array<T*, false>(a, sz, vs) {}
@@ -205,7 +205,7 @@ public:
 template<typename T>
 class sarray : public array<T, false> {
 public:
-    sarray() {}
+    sarray() = default;
     sarray(void * mem, unsigned sz, T const * vs):array<T, false>(mem, sz, vs) {}
     template<typename Allocator>
     sarray(Allocator & a, unsigned sz, T const * vs):array<T, false>(a, sz, vs) {}

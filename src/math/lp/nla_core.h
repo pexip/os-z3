@@ -18,15 +18,20 @@
 #include "math/lp/nla_basics_lemmas.h"
 #include "math/lp/nla_order_lemmas.h"
 #include "math/lp/nla_monotone_lemmas.h"
+#include "math/lp/nla_grobner.h"
+#include "math/lp/nla_powers.h"
+#include "math/lp/nla_divisions.h"
 #include "math/lp/emonics.h"
-#include "math/lp/nla_settings.h"
 #include "math/lp/nex.h"
 #include "math/lp/horner.h"
 #include "math/lp/monomial_bounds.h"
 #include "math/lp/nla_intervals.h"
-#include "math/grobner/pdd_solver.h"
 #include "nlsat/nlsat_solver.h"
+#include "smt/params/smt_params_helper.hpp"
 
+namespace nra {
+    class solver;
+}
 
 namespace nla {
 
@@ -39,193 +44,107 @@ bool try_insert(const A& elem, B& collection) {
     return true;
 }
 
-typedef lp::constraint_index     lpci;
-typedef lp::lconstraint_kind     llc;
-typedef lp::constraint_index     lpci;
-typedef lp::explanation          expl_set;
-typedef lp::var_index            lpvar;
-const lpvar null_lpvar = UINT_MAX;
-
-inline int rat_sign(const rational& r) { return r.is_pos()? 1 : ( r.is_neg()? -1 : 0); }
-inline rational rrat_sign(const rational& r) { return rational(rat_sign(r)); }
-inline bool is_set(unsigned j) {  return j != null_lpvar; } 
-inline bool is_even(unsigned k) { return (k & 1) == 0; }
-class ineq {
-    lp::lconstraint_kind m_cmp;
-    lp::lar_term         m_term;
-    rational             m_rs;
-public:
-    ineq(lp::lconstraint_kind cmp, const lp::lar_term& term, const rational& rs) : m_cmp(cmp), m_term(term), m_rs(rs) {}
-    ineq(const lp::lar_term& term, lp::lconstraint_kind cmp, int i) : m_cmp(cmp), m_term(term), m_rs(rational(i)) {}
-    ineq(const lp::lar_term& term, lp::lconstraint_kind cmp, const rational& rs) : m_cmp(cmp), m_term(term), m_rs(rs) {}
-    ineq(lpvar v, lp::lconstraint_kind cmp, int i): m_cmp(cmp), m_term(v), m_rs(rational(i)) {}
-    ineq(lpvar v, lp::lconstraint_kind cmp, rational const& r): m_cmp(cmp), m_term(v), m_rs(r) {}
-    bool operator==(const ineq& a) const {
-        return m_cmp == a.m_cmp && m_term == a.m_term && m_rs == a.m_rs;
-    }
-    const lp::lar_term& term() const { return m_term; };
-    lp::lconstraint_kind cmp() const { return m_cmp;  };
-    const rational& rs() const { return m_rs; };
-};
-
-class lemma {
-    vector<ineq>     m_ineqs;
-    lp::explanation  m_expl;
-public:
-    void push_back(const ineq& i) { m_ineqs.push_back(i);}
-    size_t size() const { return m_ineqs.size() + m_expl.size(); }
-    const vector<ineq>& ineqs() const { return m_ineqs; }
-    vector<ineq>& ineqs() { return m_ineqs; }
-    lp::explanation& expl() { return m_expl; }
-    const lp::explanation& expl() const { return m_expl; }
-    bool is_conflict() const { return m_ineqs.empty() && !m_expl.empty(); }
-};
-
-class core;
-//
-// lemmas are created in a scope.
-// when the destructor of new_lemma is invoked
-// all constraints are assumed added to the lemma
-// correctness of the lemma can be checked at this point.
-//
-class new_lemma {
-    char const* name;
-    core& c;
-    lemma& current() const;
-
-public:
-    new_lemma(core& c, char const* name);
-    ~new_lemma();
-    lemma& operator()() { return current(); }
-    std::ostream& display(std::ostream& out) const;
-    new_lemma& operator&=(lp::explanation const& e);
-    new_lemma& operator&=(const monic& m);
-    new_lemma& operator&=(const factor& f);
-    new_lemma& operator&=(const factorization& f);
-    new_lemma& operator&=(lpvar j);
-    new_lemma& operator|=(ineq const& i);
-    new_lemma& explain_fixed(lpvar j);
-    new_lemma& explain_equiv(lpvar u, lpvar v);
-    new_lemma& explain_var_separated_from_zero(lpvar j);
-    new_lemma& explain_existing_lower_bound(lpvar j);
-    new_lemma& explain_existing_upper_bound(lpvar j);    
-
-    lp::explanation& expl() { return current().expl(); }
-
-    unsigned num_ineqs() const { return current().ineqs().size(); }
-};
-
-
-inline std::ostream& operator<<(std::ostream& out, new_lemma const& l) {
-    return l.display(out);
-}
-
-struct pp_fac {
-    core const& c;
-    factor const& f;
-    pp_fac(core const& c, factor const& f): c(c), f(f) {}
-};
-
-struct pp_var {
-    core const& c;
-    lpvar v;
-    pp_var(core const& c, lpvar v): c(c), v(v) {}
-};
-
-struct pp_factorization {
-    core const& c;
-    factorization const& f;
-    pp_factorization(core const& c, factorization const& f): c(c), f(f) {}
-};
-
 class core {
-    struct stats {
-        unsigned m_nla_explanations;
-        unsigned m_nla_lemmas;
-        unsigned m_nra_calls;
-        stats() { reset(); }
-        void reset() {
-            memset(this, 0, sizeof(*this));
-        }
-    };
-    stats                    m_stats;
+    friend struct common;
     friend class new_lemma;
+    friend class grobner;
+    friend class order;
+    friend struct basics;
+    friend struct tangents;
+    friend class monotone;
+    friend class powers;
+    friend class intervals;
+    friend class horner;
+    friend class solver;
+    friend class monomial_bounds;
+    friend class nra::solver;
+    friend class divisions;
 
-    unsigned m_nlsat_delay { 50 };
-    unsigned m_nlsat_fails { 0 };
+    unsigned m_nlsat_delay = 0;
+    unsigned m_nlsat_delay_bound = 0;
+
     bool should_run_bounded_nlsat();
     lbool bounded_nlsat();
-public:
+
     var_eqs<emonics>         m_evars;
-    lp::lar_solver&          m_lar_solver;
-    vector<lemma> *          m_lemma_vec;
-    lp::u_set                m_to_refine;
+
+    lp::lar_solver&          lra;
+    reslimit&                m_reslim;
+    smt_params_helper        m_params;
+    std::function<bool(lpvar)> m_relevant;
+    vector<lemma>            m_lemmas;
+    vector<ineq>             m_literals;
+    vector<lp::equality>       m_equalities;
+    vector<lp::fixed_equality> m_fixed_equalities;
+    indexed_uint_set         m_to_refine;
+    indexed_uint_set         m_monics_with_changed_bounds;
     tangents                 m_tangents;
     basics                   m_basics;
     order                    m_order;
     monotone                 m_monotone;
+    powers                   m_powers;
+    divisions                m_divisions;
     intervals                m_intervals; 
     monomial_bounds          m_monomial_bounds;
+    unsigned                 m_conflicts;
+    bool                     m_check_feasible = false;
     horner                   m_horner;
-    nla_settings             m_nla_settings;    
-    dd::pdd_manager          m_pdd_manager;
-    dd::solver               m_pdd_grobner;
-private:
+    grobner                  m_grobner;
     emonics                  m_emons;
     svector<lpvar>           m_add_buffer;
-    mutable lp::u_set        m_active_var_set;
-    lp::u_set                m_rows;
+    mutable indexed_uint_set m_active_var_set;
+
     reslimit                 m_nra_lim;
-public:
-    reslimit&                m_reslim;
-    bool                     m_use_nra_model;
+
+    bool                     m_use_nra_model = false;
     nra::solver              m_nra;
-private:
-    bool                     m_cautious_patching;
-    lpvar                    m_patched_var;
-    monic const*             m_patched_monic;      
+    bool                     m_cautious_patching = true;
+    lpvar                    m_patched_var = 0;
+    monic const*             m_patched_monic = nullptr;      
 
     void check_weighted(unsigned sz, std::pair<unsigned, std::function<void(void)>>* checks);
+    void add_bounds();
 
 public:    
+    // constructor
+    core(lp::lar_solver& s, params_ref const& p, reslimit&);
+    const auto& monics_with_changed_bounds() const { return m_monics_with_changed_bounds; }
     void insert_to_refine(lpvar j);
     void erase_from_to_refine(lpvar j);
     
-    const lp::u_set&  active_var_set () const { return m_active_var_set;}
+    const indexed_uint_set&  active_var_set () const { return m_active_var_set;}
     bool active_var_set_contains(unsigned j) const { return m_active_var_set.contains(j); }
 
-    void insert_to_active_var_set(unsigned j) const { m_active_var_set.insert(j); }    
+    void insert_to_active_var_set(unsigned j) const { 
+        m_active_var_set.insert(j); 
+    }    
 
-    void clear_active_var_set() const {
-        m_active_var_set.clear();
-    }
+    void clear_active_var_set() const { m_active_var_set.reset(); }
 
-    void clear_and_resize_active_var_set() const {
-        m_active_var_set.clear();
-        m_active_var_set.resize(m_lar_solver.number_of_vars());
-    }
-    
+    unsigned get_var_weight(lpvar) const;
+
     reslimit& reslim() { return m_reslim; }  
     emonics& emons() { return m_emons; }
     const emonics& emons() const { return m_emons; }
-    // constructor
-    core(lp::lar_solver& s, reslimit &);
-   
+    monic& emon(unsigned i) { return m_emons[i]; }
+    monic const& emon(unsigned i) const { return m_emons[i]; }
+
+    bool has_relevant_monomial() const;
+
     bool compare_holds(const rational& ls, llc cmp, const rational& rs) const;
     
     rational value(const lp::lar_term& r) const;
     
-    lp::lar_term subs_terms_to_columns(const lp::lar_term& t) const;
     bool ineq_holds(const ineq& n) const;
     bool lemma_holds(const lemma& l) const;
     bool is_monic_var(lpvar j) const { return m_emons.is_monic_var(j); }
-    const rational& val(lpvar j) const { return m_lar_solver.get_column_value(j).x; }
+    const rational& val(lpvar j) const { return lra.get_column_value(j).x; }
 
-    const rational& var_val(const monic& m) const { return m_lar_solver.get_column_value(m.var()).x; }
+    const rational& var_val(const monic& m) const { return lra.get_column_value(m.var()).x; }
 
     rational mul_val(const monic& m) const { 
         rational r(1);
-        for (lpvar v : m.vars()) r *= m_lar_solver.get_column_value(v).x;
+        for (lpvar v : m.vars()) r *= lra.get_column_value(v).x;
         return r;
     }
 
@@ -241,14 +160,19 @@ public:
     
     lpvar var(const factor& f) const { return f.var(); }
 
+    smt_params_helper const & params() const { return m_params; }
+
     // returns true if the combination of the Horner's schema and Grobner Basis should be called
     bool need_run_horner() const { 
-        return m_nla_settings.run_horner() && lp_settings().stats().m_nla_calls % m_nla_settings.horner_frequency() == 0; 
+        return params().arith_nl_horner() && lp_settings().stats().m_nla_calls % params().arith_nl_horner_frequency() == 0; 
     }
 
-    bool need_run_grobner() const { 
-        return m_nla_settings.run_grobner() && lp_settings().stats().m_nla_calls % m_nla_settings.grobner_frequency() == 0; 
+    bool need_run_grobner() const {
+        return params().arith_nl_grobner();         
     }
+
+    void set_active_vars_weights(nex_creator&);
+    std::unordered_set<lpvar> get_vars_of_expr_with_opening_terms(const nex* e);
     
     void incremental_linearization(bool);
     
@@ -273,8 +197,17 @@ public:
     void deregister_monic_from_tables(const monic & m, unsigned i);
 
     void add_monic(lpvar v, unsigned sz, lpvar const* vs);   
+    void add_idivision(lpvar q, lpvar x, lpvar y) { m_divisions.add_idivision(q, x, y); }
+    void add_rdivision(lpvar q, lpvar x, lpvar y) { m_divisions.add_rdivision(q, x, y); }
+    void add_bounded_division(lpvar q, lpvar x, lpvar y) { m_divisions.add_bounded_division(q, x, y); }
+
+    void set_relevant(std::function<bool(lpvar)>& is_relevant) { m_relevant = is_relevant; }
+    bool is_relevant(lpvar v) const { return !m_relevant || m_relevant(v); }
+
     void push();     
     void pop(unsigned n);
+
+    trail_stack& trail() { return m_emons.get_trail_stack(); }
 
     rational mon_value_by_vars(unsigned i) const;
     rational product_value(const monic & m) const;
@@ -296,6 +229,7 @@ public:
     
     std::ostream & print_factor(const factor& f, std::ostream& out) const;
     std::ostream & print_factor_with_vars(const factor& f, std::ostream& out) const;
+    std::ostream & print_factor_with_vars(lpvar j, std::ostream& out) const { return print_var(j, out); }
     std::ostream& print_monic(const monic& m, std::ostream& out) const;
     std::ostream& print_bfc(const factorization& m, std::ostream& out) const;
     std::ostream& print_monic_with_vars(unsigned i, std::ostream& out) const;
@@ -349,16 +283,16 @@ public:
     }
     const rational& get_upper_bound(unsigned j) const;
     const rational& get_lower_bound(unsigned j) const;    
-    bool has_lower_bound(lp::var_index var, lp::constraint_index& ci, lp::mpq& value, bool& is_strict) const { 
-        return m_lar_solver.has_lower_bound(var, ci, value, is_strict); 
+    bool has_lower_bound(lp::lpvar var, u_dependency*& ci, lp::mpq& value, bool& is_strict) const { 
+        return lra.has_lower_bound(var, ci, value, is_strict); 
     }
-    bool has_upper_bound(lp::var_index var, lp::constraint_index& ci, lp::mpq& value, bool& is_strict) const {
-        return m_lar_solver.has_upper_bound(var, ci, value, is_strict);
+    bool has_upper_bound(lp::lpvar var, u_dependency*& ci, lp::mpq& value, bool& is_strict) const {
+        return lra.has_upper_bound(var, ci, value, is_strict);
     }
 
     
     bool zero_is_an_inner_point_of_bounds(lpvar j) const;    
-    bool var_is_int(lpvar j) const { return m_lar_solver.column_is_int(j); }
+    bool var_is_int(lpvar j) const { return lra.column_is_int(j); }
     int rat_sign(const monic& m) const;
     inline int rat_sign(lpvar j) const { return nla::rat_sign(val(j)); }
 
@@ -400,7 +334,7 @@ public:
 
     bool is_octagon_term(const lp::lar_term& t, bool & sign, lpvar& i, lpvar &j) const;
     
-    void add_equivalence_maybe(const lp::lar_term *t, lpci c0, lpci c1);
+    void add_equivalence_maybe(const lp::lar_term* t, u_dependency* c0, u_dependency* c1);
 
     void init_vars_equivalence();
 
@@ -442,39 +376,33 @@ public:
 
     bool  conflict_found() const;
     
-    lbool  check(vector<lemma>& l_vec);
+    lbool check();
+    lbool check_power(lpvar r, lpvar x, lpvar y);
+    void check_bounded_divisions();
 
     bool  no_lemmas_hold() const;
+
+    void propagate();
+
+    void simplify();
     
-    lbool  test_check(vector<lemma>& l);
+    lbool  test_check();
     lpvar map_to_root(lpvar) const;
     std::ostream& print_terms(std::ostream&) const;
     std::ostream& print_term(const lp::lar_term&, std::ostream&) const;
+
     template <typename T>
-    std::ostream& print_row(const T & row , std::ostream& out) const {
+    std::ostream& print_row(const T& row, std::ostream& out) const {
         vector<std::pair<rational, lpvar>> v;
         for (auto p : row) {
             v.push_back(std::make_pair(p.coeff(), p.var()));
         }
-        return lp::print_linear_combination_customized(v, [this](lpvar j) { return var_str(j); },
-        out);        
+        return lp::print_linear_combination_customized(v, [this](lpvar j) { return var_str(j); }, out);
     }
-    void run_grobner();
-    void find_nl_cluster();
-    void prepare_rows_and_active_vars();
-    void add_var_and_its_factors_to_q_and_collect_new_rows(lpvar j,  svector<lpvar>& q);
-    std::unordered_set<lpvar> get_vars_of_expr_with_opening_terms(const nex* e);
-    void display_matrix_of_m_rows(std::ostream & out) const;
-    void set_active_vars_weights(nex_creator&);
-    unsigned get_var_weight(lpvar) const;
-    void add_row_to_grobner(const vector<lp::row_cell<rational>> & row);    
-    bool check_pdd_eq(const dd::solver::equation*);
-    const rational& val_of_fixed_var_with_deps(lpvar j, u_dependency*& dep);
-    dd::pdd pdd_expr(const rational& c, lpvar j, u_dependency*&);
-    void set_level2var_for_grobner();
-    void configure_grobner();
+    
     bool influences_nl_var(lpvar) const;
     bool is_nl_var(lpvar) const;
+    
     bool is_used_in_monic(lpvar) const;
     void patch_monomials();
     void patch_monomials_on_to_refine();
@@ -489,16 +417,17 @@ public:
     bool var_is_big(lpvar) const;
     bool has_real(const factorization&) const;
     bool has_real(const monic& m) const;
-    void set_use_nra_model(bool m) { m_use_nra_model = m; }
+    void set_use_nra_model(bool m);
     bool use_nra_model() const { return m_use_nra_model; }
-    void collect_statistics(::statistics&);
-private:
-    void restore_patched_values();
-    void constrain_nl_in_tableau();
-    bool solve_tableau();
-    void restore_tableau();
-    void save_tableau();
-    bool integrality_holds();
+    vector<nla::lemma> const& lemmas() const { return m_lemmas; }
+    vector<nla::ineq> const& literals() const { return m_literals; }
+    vector<lp::equality> const& equalities() const { return m_equalities; }
+    vector<lp::fixed_equality> const& fixed_equalities() const { return m_fixed_equalities; }
+    bool should_check_feasible() const { return m_check_feasible; }
+
+    void add_fixed_equality(lp::lpvar v, rational const& k, lp::explanation const& e) { m_fixed_equalities.push_back({v, k, e}); }
+    void add_equality(lp::lpvar i, lp::lpvar j, lp::explanation const& e) { m_equalities.push_back({i, j, e}); }
+
 };  // end of core
 
 struct pp_mon {

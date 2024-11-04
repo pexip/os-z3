@@ -33,7 +33,7 @@ endforeach()
 
 # Generate z3core.py
 add_custom_command(OUTPUT "${z3py_bindings_build_dest}/z3/z3core.py"
-  COMMAND "${PYTHON_EXECUTABLE}"
+  COMMAND "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/scripts/update_api.py"
     ${Z3_FULL_PATH_API_HEADER_FILES_TO_SCAN}
     "--z3py-output-dir"
@@ -42,16 +42,14 @@ add_custom_command(OUTPUT "${z3py_bindings_build_dest}/z3/z3core.py"
     ${Z3_FULL_PATH_API_HEADER_FILES_TO_SCAN}
     "${PROJECT_SOURCE_DIR}/scripts/update_api.py"
     ${Z3_GENERATED_FILE_EXTRA_DEPENDENCIES}
-    # FIXME: When update_api.py no longer uses ``mk_util`` drop this dependency
-    "${PROJECT_SOURCE_DIR}/scripts/mk_util.py"
   COMMENT "Generating z3core.py"
-  ${ADD_CUSTOM_COMMAND_USES_TERMINAL_ARG}
+  USES_TERMINAL
 )
 list(APPEND build_z3_python_bindings_target_depends "${z3py_bindings_build_dest}/z3/z3core.py")
 
 # Generate z3consts.py
 add_custom_command(OUTPUT "${z3py_bindings_build_dest}/z3/z3consts.py"
-  COMMAND "${PYTHON_EXECUTABLE}"
+  COMMAND "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/scripts/mk_consts_files.py"
     ${Z3_FULL_PATH_API_HEADER_FILES_TO_SCAN}
     "--z3py-output-dir"
@@ -61,7 +59,7 @@ add_custom_command(OUTPUT "${z3py_bindings_build_dest}/z3/z3consts.py"
     "${PROJECT_SOURCE_DIR}/scripts/mk_consts_files.py"
     ${Z3_GENERATED_FILE_EXTRA_DEPENDENCIES}
   COMMENT "Generating z3consts.py"
-  ${ADD_CUSTOM_COMMAND_USES_TERMINAL_ARG}
+  USES_TERMINAL
 )
 list(APPEND build_z3_python_bindings_target_depends "${z3py_bindings_build_dest}/z3/z3consts.py")
 
@@ -98,8 +96,8 @@ if (Z3_INSTALL_PYTHON_BINDINGS)
   if (NOT DEFINED CMAKE_INSTALL_PYTHON_PKG_DIR)
     message(STATUS "CMAKE_INSTALL_PYTHON_PKG_DIR not set. Trying to guess")
     execute_process(
-      COMMAND "${PYTHON_EXECUTABLE}" "-c"
-        "import distutils.sysconfig; print(distutils.sysconfig.get_python_lib())"
+      COMMAND "${Python3_EXECUTABLE}" "-c"
+        "import sysconfig; print(sysconfig.get_path('purelib'))"
       RESULT_VARIABLE exit_code
       OUTPUT_VARIABLE CMAKE_INSTALL_PYTHON_PKG_DIR
       OUTPUT_STRIP_TRAILING_WHITESPACE

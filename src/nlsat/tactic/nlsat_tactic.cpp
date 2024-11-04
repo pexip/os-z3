@@ -55,8 +55,8 @@ class nlsat_tactic : public tactic {
         }
         
         void updt_params(params_ref const & p) {
-            m_params = p;
-            m_solver.updt_params(p);
+            m_params.append(p);
+            m_solver.updt_params(m_params);
         }
         
         bool contains_unsupported(expr_ref_vector & b2a, expr_ref_vector & x2t) {
@@ -125,7 +125,9 @@ class nlsat_tactic : public tactic {
                     continue; // don't care
                 md->register_decl(to_app(a)->get_decl(), val == l_true ? m.mk_true() : m.mk_false());
             }
-            DEBUG_CODE(eval_model(*md.get(), g););
+#ifdef Z3DEBUG
+            eval_model(*md.get(), g);
+#endif            
             // VERIFY(eval_model(*md.get(), g));
             mc = model2model_converter(md.get());
             return ok;
@@ -223,8 +225,10 @@ public:
         SASSERT(m_imp == 0);
     }
 
+    char const* name() const override { return "nlsat"; }
+
     void updt_params(params_ref const & p) override {
-        m_params = p;
+        m_params.append(p);
     }
 
     void collect_param_descrs(param_descrs & r) override {
@@ -258,6 +262,9 @@ public:
     void reset_statistics() override {
         m_stats.reset();
     }
+
+    void user_propagate_initialize_value(expr* var, expr* value) override { }
+
 };
 
 tactic * mk_nlsat_tactic(ast_manager & m, params_ref const & p) {

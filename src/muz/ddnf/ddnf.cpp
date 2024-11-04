@@ -25,7 +25,8 @@ Revision History:
 #include "muz/base/dl_context.h"
 #include "ast/scoped_proof.h"
 #include "ast/bv_decl_plugin.h"
-#include "muz/rel/tbv.h"
+#include "util/tbv.h"
+#include <iostream>
 
 namespace datalog {
 
@@ -76,8 +77,6 @@ namespace datalog {
             m_eq(tbvm),
             m_descendants(DEFAULT_HASHTABLE_INITIAL_CAPACITY, m_hash, m_eq) {
         }
-
-        ~ddnf_node() {}
 
         unsigned inc_ref() {
             return ++m_refs;
@@ -224,9 +223,9 @@ namespace datalog {
         }
 
         void display_statistics(std::ostream& out) const {            
-            std::cout << "Number of insertions:  " << m_stats.m_num_inserts << "\n";
-            std::cout << "Number of comparisons: " << m_stats.m_num_comparisons << "\n";
-            std::cout << "Number of nodes:       " << size() << "\n";
+            out << "Number of insertions:  " << m_stats.m_num_inserts << "\n"
+                   "Number of comparisons: " << m_stats.m_num_comparisons << "\n"
+                   "Number of nodes:       " << size() << "\n";
         }
 
         void display(std::ostream& out) const {            
@@ -428,8 +427,6 @@ namespace datalog {
     class ddnfs {
         u_map<ddnf_mgr*> m_mgrs;
     public:
-        ddnfs() {}
-
         ~ddnfs() {
             u_map<ddnf_mgr*>::iterator it = m_mgrs.begin(), end = m_mgrs.end();
             for (; it != end; ++it) {
@@ -501,8 +498,6 @@ namespace datalog {
             params.set_sym("engine", symbol("datalog"));
             m_inner_ctx.updt_params(params);
         }
-
-        ~imp() {}        
 
         lbool query(expr* query) {
             m_ctx.ensure_opened();
@@ -683,14 +678,9 @@ namespace datalog {
         }
 
         bool compile_rules1(rule_set const& rules, rule_set& new_rules) {
-            datalog::rule_set::iterator it  = rules.begin();
-            datalog::rule_set::iterator end = rules.end();
-            unsigned idx = 0;
-            for (; it != end; ++idx, ++it) {
-                if (!compile_rule1(**it, rules, new_rules)) {
+            for (auto const & r : rules) 
+                if (!compile_rule1(*r, rules, new_rules)) 
                     return false;
-                }
-            }
             return true;            
         }
 

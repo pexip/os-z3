@@ -188,6 +188,7 @@ int main(int argc, char ** argv) {
     TST(total_order);
     TST(dl_table);
     TST(dl_context);
+    TST(dlist);
     TST(dl_util);
     TST(dl_product_relation);
     TST(dl_relation);
@@ -259,7 +260,14 @@ int main(int argc, char ** argv) {
     TST(bdd);
     TST(pdd);
     TST(pdd_solver);
+    TST(scoped_timer);
     TST(solver_pool);
     //TST_ARGV(hs);
     TST(finder);
+    TST(totalizer);
+    TST(distribution);
+    TST(euf_bv_plugin);
+    TST(euf_arith_plugin);
+    TST(sls_test);
+    TST(scoped_vector);
 }

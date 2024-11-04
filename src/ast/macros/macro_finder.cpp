@@ -65,7 +65,7 @@ bool macro_finder::is_arith_macro(expr * n, proof * pr, bool deps_valid, expr_de
     // functions introduced within macros are Skolem functions
     // To avoid unsound expansion of these as macros (because they 
     // appear in model conversions and are therefore not fully
-    // replacable) we prevent these from being treated as macro functions.
+    // replaceable) we prevent these from being treated as macro functions.
     if (m_macro_manager.contains(f) || f->is_skolem())
         return false;
 
@@ -269,9 +269,6 @@ macro_finder::macro_finder(ast_manager & m, macro_manager & mm):
     m_autil(m) {
 }
 
-macro_finder::~macro_finder() {
-}
-
 bool macro_finder::expand_macros(expr_ref_vector const& exprs, proof_ref_vector const& prs, expr_dependency_ref_vector const& deps,  expr_ref_vector & new_exprs, proof_ref_vector & new_prs, expr_dependency_ref_vector & new_deps) {
     TRACE("macro_finder", tout << "starting expand_macros:\n";
           m_macro_manager.display(tout););
@@ -376,7 +373,17 @@ bool macro_finder::expand_macros(unsigned num, justified_expr const * fmls, vect
     return found_new_macro;
 }
 
+void macro_finder::revert_unsafe_macros(vector<justified_expr>& new_fmls) {
+    auto& unsafe_macros = m_macro_manager.unsafe_macros();
+    for (auto* f : unsafe_macros) {
+        quantifier* q = m_macro_manager.get_macro_quantifier(f);
+        new_fmls.push_back(justified_expr(m, q, nullptr));
+    }
+    unsafe_macros.reset();
+}
+
 void macro_finder::operator()(unsigned n, justified_expr const* fmls, vector<justified_expr>& new_fmls) {
+    m_macro_manager.unsafe_macros().reset();
     TRACE("macro_finder", tout << "processing macros...\n";);
     vector<justified_expr> _new_fmls;
     if (expand_macros(n, fmls, _new_fmls)) {
@@ -388,6 +395,7 @@ void macro_finder::operator()(unsigned n, justified_expr const* fmls, vector<jus
                 break;
         }
     }
+    revert_unsafe_macros(_new_fmls);
     new_fmls.append(_new_fmls);
 }
 

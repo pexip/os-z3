@@ -990,7 +990,7 @@ namespace sat {
         m_rating.push_back(0);
         m_vprefix.push_back(prefix());
         if (!m_s.was_eliminated(v)) 
-            m_freevars.insert(v);
+            m_freevars.insert_fresh(v);
     }
 
     void lookahead::init(bool learned) {
@@ -1001,6 +1001,7 @@ namespace sat {
         m_inconsistent = false;
         m_qhead = 0;
         m_bstamp_id = 0;
+        m_istamp_id = 0;
 
         for (unsigned i = 0; i < m_num_vars; ++i) {
             init_var(i);
@@ -1095,7 +1096,7 @@ namespace sat {
             literal l = m_trail[i];
             set_undef(l);
             TRACE("sat", tout << "inserting free var v" << l.var() << "\n";);
-            m_freevars.insert(l.var());
+            m_freevars.insert_fresh(l.var());
         }
             
         m_num_tc1 = m_num_tc1_lim.back();
@@ -1391,7 +1392,6 @@ namespace sat {
     void lookahead::propagate_clauses_searching(literal l) {
         // clauses where l is negative
         unsigned sz = m_nary_count[(~l).index()];
-        literal lit;
         SASSERT(m_search_mode == lookahead_mode::searching);
         for (nary* n : m_nary[(~l).index()]) {
             if (sz-- == 0) break;

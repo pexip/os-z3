@@ -105,7 +105,6 @@ class array_decl_plugin : public decl_plugin {
     bool is_array_sort(sort* s) const;
  public:
     array_decl_plugin();
-    ~array_decl_plugin() override {}
 
     decl_plugin * mk_fresh() override {
         return alloc(array_decl_plugin);
@@ -135,6 +134,11 @@ class array_decl_plugin : public decl_plugin {
     expr * get_some_value(sort * s) override;
 
     bool is_fully_interp(sort * s) const override;
+
+    bool is_value(app * e) const override;
+
+    bool is_unique_value(app* e) const override;
+
 };
 
 class array_recognizers {
@@ -149,7 +153,12 @@ public:
     bool is_store(expr* n) const { return is_app_of(n, m_fid, OP_STORE); }
     bool is_const(expr* n) const { return is_app_of(n, m_fid, OP_CONST_ARRAY); }
     bool is_ext(expr* n) const { return is_app_of(n, m_fid, OP_ARRAY_EXT); }
+    bool is_ext(func_decl const* f) const { return is_decl_of(f, m_fid, OP_ARRAY_EXT); }
     bool is_map(expr* n) const { return is_app_of(n, m_fid, OP_ARRAY_MAP); }
+    bool is_union(expr* n) const { return is_app_of(n, m_fid, OP_SET_UNION); }
+    bool is_intersect(expr* n) const { return is_app_of(n, m_fid, OP_SET_INTERSECT); }
+    bool is_difference(expr* n) const { return is_app_of(n, m_fid, OP_SET_DIFFERENCE); }
+    bool is_complement(expr* n) const { return is_app_of(n, m_fid, OP_SET_COMPLEMENT); }
     bool is_as_array(expr * n) const { return is_app_of(n, m_fid, OP_AS_ARRAY); }
     bool is_as_array(expr * n, func_decl*& f) const { return is_as_array(n) && (f = get_as_array_func_decl(n), true); }
     bool is_set_has_size(expr* e) const { return is_app_of(e, m_fid, OP_SET_HAS_SIZE); }
@@ -158,12 +167,16 @@ public:
     bool is_store(func_decl* f) const { return is_decl_of(f, m_fid, OP_STORE); }
     bool is_const(func_decl* f) const { return is_decl_of(f, m_fid, OP_CONST_ARRAY); }
     bool is_map(func_decl* f) const { return is_decl_of(f, m_fid, OP_ARRAY_MAP); }
+    bool is_union(func_decl* f) const { return is_decl_of(f, m_fid, OP_SET_UNION); }
+    bool is_intersect(func_decl* f) const { return is_decl_of(f, m_fid, OP_SET_INTERSECT); }
     bool is_as_array(func_decl* f) const { return is_decl_of(f, m_fid, OP_AS_ARRAY); }
     bool is_set_has_size(func_decl* f) const { return is_decl_of(f, m_fid, OP_SET_HAS_SIZE); }
     bool is_set_card(func_decl* f) const { return is_decl_of(f, m_fid, OP_SET_CARD); }
     bool is_default(func_decl* f) const { return is_decl_of(f, m_fid, OP_ARRAY_DEFAULT); }
     bool is_default(expr* n) const { return is_app_of(n, m_fid, OP_ARRAY_DEFAULT); }
+    bool is_subset(expr const* n) const { return is_app_of(n, m_fid, OP_SET_SUBSET); }
     bool is_as_array(func_decl* f, func_decl*& g) const { return is_decl_of(f, m_fid, OP_AS_ARRAY) && (g = get_as_array_func_decl(f), true); }
+    bool is_map(func_decl* f, func_decl*& g) const { return is_map(f) && (g = get_map_func_decl(f), true); }
     func_decl * get_as_array_func_decl(expr * n) const;
     func_decl * get_as_array_func_decl(func_decl* f) const;
     func_decl * get_map_func_decl(func_decl* f) const;
@@ -172,6 +185,23 @@ public:
     bool is_const(expr* e, expr*& v) const;
 
     bool is_store_ext(expr* e, expr_ref& a, expr_ref_vector& args, expr_ref& value);
+
+
+    bool is_select1(expr* n) const { return is_select(n) && to_app(n)->get_num_args() == 2; }
+    
+    bool is_select1(expr* n, expr*& a, expr*& i) const {
+        return is_select1(n) && (a = to_app(n)->get_arg(0), i = to_app(n)->get_arg(1), true);
+    }
+
+    bool is_store1(expr* n) const { return is_store(n) && to_app(n)->get_num_args() == 3; }
+    
+    bool is_store1(expr* n, expr*& a, expr*& i, expr*& v) const {
+        app* _n;
+        return is_store1(n) && (_n = to_app(n), a = _n->get_arg(0), i = _n->get_arg(1), v = _n->get_arg(2), true);
+    }
+
+
+    MATCH_BINARY(is_subset);
 };
 
 class array_util : public array_recognizers {
@@ -192,6 +222,15 @@ public:
 
     app * mk_store(ptr_vector<expr> const& args) const {
         return mk_store(args.size(), args.data());
+    }
+
+    app* mk_store(ptr_buffer<expr> const& args) const {
+        return mk_store(args.size(), args.data());
+    }
+
+    app * mk_select(expr* a, expr* i) const {
+        expr* args[2] = { a, i };
+        return mk_select(2, args);
     }
 
     app * mk_select(unsigned num_args, expr * const * args) const {
@@ -262,6 +301,8 @@ public:
     func_decl * mk_array_ext(sort* domain, unsigned i);
 
     sort * mk_array_sort(sort* dom, sort* range) { return mk_array_sort(1, &dom, range); }
+    sort * mk_array_sort(sort* a, sort* b, sort* range) { sort* dom[2] = { a, b }; return mk_array_sort(2, dom, range); }
+    sort * mk_array_sort(sort* a, sort* b, sort* c, sort* range) { sort* dom[3] = { a, b, c}; return mk_array_sort(3, dom, range); }
 
     sort * mk_array_sort(unsigned arity, sort* const* domain, sort* range);
 

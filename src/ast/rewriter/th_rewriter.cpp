@@ -17,10 +17,12 @@ Notes:
 
 --*/
 #include "params/rewriter_params.hpp"
+#include "params/poly_rewriter_params.hpp"
 #include "ast/rewriter/th_rewriter.h"
 #include "ast/rewriter/bool_rewriter.h"
 #include "ast/rewriter/arith_rewriter.h"
 #include "ast/rewriter/bv_rewriter.h"
+#include "ast/rewriter/char_rewriter.h"
 #include "ast/rewriter/datatype_rewriter.h"
 #include "ast/rewriter/array_rewriter.h"
 #include "ast/rewriter/fpa_rewriter.h"
@@ -30,12 +32,15 @@ Notes:
 #include "ast/rewriter/seq_rewriter.h"
 #include "ast/rewriter/rewriter_def.h"
 #include "ast/rewriter/var_subst.h"
+#include "ast/rewriter/der.h"
 #include "ast/rewriter/expr_safe_replace.h"
 #include "ast/expr_substitution.h"
 #include "ast/ast_smt2_pp.h"
 #include "ast/ast_pp.h"
 #include "ast/ast_util.h"
 #include "ast/well_sorted.h"
+#include "ast/for_each_expr.h"
+#include "ast/array_peq.h"
 
 namespace {
 struct th_rewriter_cfg : public default_rewriter_cfg {
@@ -48,31 +53,40 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
     dl_rewriter         m_dl_rw;
     pb_rewriter         m_pb_rw;
     seq_rewriter        m_seq_rw;
+    char_rewriter       m_char_rw;
     recfun_rewriter     m_rec_rw;
     arith_util          m_a_util;
     bv_util             m_bv_util;
+    der                 m_der;
     expr_safe_replace   m_rep;
-    bool                m_new_subst { false };
+    unused_vars_eliminator m_elim_unused_vars;
     expr_ref_vector     m_pinned;
-    unsigned long long  m_max_memory; // in bytes
-    unsigned            m_max_steps;    
-    bool                m_pull_cheap_ite;
-    bool                m_flat;
-    bool                m_cache_all;
-    bool                m_push_ite_arith;
-    bool                m_push_ite_bv;
-    bool                m_ignore_patterns_on_ground_qbody;
-    bool                m_rewrite_patterns;
-
-    // substitution support
+      // substitution support
     expr_dependency_ref m_used_dependencies; // set of dependencies of used substitutions
-    expr_substitution * m_subst;
+    expr_substitution * m_subst = nullptr;
+    unsigned long long  m_max_memory; // in bytes
+    bool                m_new_subst = false;
+    expr_fast_mark1     m_visited;
+    expr_mark           m_marks;
+    bool                m_new_mark = false;
+    unsigned            m_max_steps = UINT_MAX;
+    bool                m_pull_cheap_ite = true;
+    bool                m_flat = true;
+    bool                m_cache_all = false;
+    bool                m_push_ite_arith = true;
+    bool                m_push_ite_bv = true;
+    bool                m_ignore_patterns_on_ground_qbody = true;
+    bool                m_rewrite_patterns = true;
+    bool                m_enable_der = true;
+    bool                m_nested_der = false;
+
 
     ast_manager & m() const { return m_b_rw.m(); }
 
     void updt_local_params(params_ref const & _p) {
         rewriter_params p(_p);
-        m_flat           = p.flat();
+        poly_rewriter_params pp(_p);
+        m_flat           = pp.flat();
         m_max_memory     = megabytes_to_bytes(p.max_memory());
         m_max_steps      = p.max_steps();
         m_pull_cheap_ite = p.pull_cheap_ite();
@@ -81,6 +95,8 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
         m_push_ite_bv    = p.push_ite_bv();
         m_ignore_patterns_on_ground_qbody = p.ignore_patterns_on_ground_qbody();
         m_rewrite_patterns = p.rewrite_patterns();
+        m_enable_der     = p.enable_der();
+        m_nested_der     = _p.get_bool("nested_der", false);
     }
 
     void updt_params(params_ref const & p) {
@@ -119,36 +135,6 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
         return num_steps > m_max_steps;
     }
 
-    // Return true if t is of the form
-    //    (= t #b0)
-    //    (= t #b1)
-    //    (= #b0 t)
-    //    (= #b1 t)
-    bool is_eq_bit(expr * t, expr * & x, unsigned & val) {
-        if (!m().is_eq(t))
-            return false;
-        expr * lhs = to_app(t)->get_arg(0);
-        if (!m_bv_rw.is_bv(lhs))
-            return false;
-        if (m_bv_rw.get_bv_size(lhs) != 1)
-            return false;
-        expr * rhs = to_app(t)->get_arg(1);
-        rational v;
-        unsigned sz;
-        if (m_bv_rw.is_numeral(lhs, v, sz)) {
-            x    = rhs;
-            val  = v.get_unsigned();
-            SASSERT(val == 0 || val == 1);
-            return true;
-        }
-        if (m_bv_rw.is_numeral(rhs, v, sz)) {
-            x   = lhs;
-            val  = v.get_unsigned();
-            SASSERT(val == 0 || val == 1);
-            return true;
-        }
-        return false;
-    }
 
     // (iff (= x bit1) A)
     // --->
@@ -156,11 +142,11 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
     br_status apply_tamagotchi(expr * lhs, expr * rhs, expr_ref & result) {
         expr * x;
         unsigned val;
-        if (is_eq_bit(lhs, x, val)) {
+        if (m_bv_rw.is_eq_bit(lhs, x, val)) {
             result = m().mk_eq(x, m().mk_ite(rhs, m_bv_rw.mk_numeral(val, 1), m_bv_rw.mk_numeral(1-val, 1)));
             return BR_REWRITE2;
         }
-        if (is_eq_bit(rhs, x, val)) {
+        if (m_bv_rw.is_eq_bit(rhs, x, val)) {
             result = m().mk_eq(x, m().mk_ite(lhs, m_bv_rw.mk_numeral(val, 1), m_bv_rw.mk_numeral(1-val, 1)));
             return BR_REWRITE2;
         }
@@ -177,25 +163,7 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
             if (k == OP_EQ) {
                 // theory dispatch for =
                 SASSERT(num == 2);
-                family_id s_fid = args[0]->get_sort()->get_family_id();
-                if (s_fid == m_a_rw.get_fid()) 
-                    st = m_a_rw.mk_eq_core(args[0], args[1], result);
-                else if (s_fid == m_bv_rw.get_fid())
-                    st = m_bv_rw.mk_eq_core(args[0], args[1], result);
-                else if (s_fid == m_dt_rw.get_fid())
-                    st = m_dt_rw.mk_eq_core(args[0], args[1], result);
-                else if (s_fid == m_f_rw.get_fid())
-                    st = m_f_rw.mk_eq_core(args[0], args[1], result);
-                else if (s_fid == m_ar_rw.get_fid())
-                    st = m_ar_rw.mk_eq_core(args[0], args[1], result);
-                else if (s_fid == m_seq_rw.get_fid())
-                    st = m_seq_rw.mk_eq_core(args[0], args[1], result);
-                if (st != BR_FAILED)
-                    return st;     
-            }
-            if (k == OP_EQ) {
-                SASSERT(num == 2);
-                st = apply_tamagotchi(args[0], args[1], result);
+                st = reduce_eq(args[0], args[1], result);
                 if (st != BR_FAILED)
                     return st;
             }
@@ -208,14 +176,24 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
                     return st;
             }
             if ((k == OP_AND || k == OP_OR) && m_seq_rw.u().has_re()) {
-                st = m_seq_rw.mk_bool_app(f, num, args, result); 
+                st = m_seq_rw.mk_bool_app(f, num, args, result);
                 if (st != BR_FAILED)
                     return st;
             }
-            if (k == OP_EQ && m_seq_rw.u().has_seq() && is_app(args[0]) && 
+            if (false && k == OP_AND) {
+                st = m_a_rw.mk_and_core(num, args, result);
+                if (st != BR_FAILED)
+                    return st;
+            }
+            if (k == OP_EQ && m_seq_rw.u().has_seq() && is_app(args[0]) &&
                 to_app(args[0])->get_family_id() == m_seq_rw.get_fid()) {
                 st = m_seq_rw.mk_eq_core(args[0], args[1], result);
                 if (st != BR_FAILED)
+                    return st;
+            }
+            if (k == OP_DISTINCT && num > 0 && m_bv_rw.is_bv(args[0])) {
+               st = m_bv_rw.mk_distinct(num, args, result);
+               if (st != BR_FAILED)
                     return st;
             }
 
@@ -247,6 +225,8 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
             return m_pb_rw.mk_app_core(f, num, args, result);
         if (fid == m_seq_rw.get_fid())
             return m_seq_rw.mk_app_core(f, num, args, result);
+        if (fid == m_char_rw.get_fid())
+            return m_char_rw.mk_app_core(f, num, args, result);
         if (fid == m_rec_rw.get_fid())
             return m_rec_rw.mk_app_core(f, num, args, result);
         return BR_FAILED;
@@ -295,6 +275,8 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
     bool is_ite_value_tree(expr * t) {
         if (!m().is_ite(t))
             return false;
+        if (t->get_ref_count() != 1)
+            return false;
         ptr_buffer<app> todo;
         todo.push_back(to_app(t));
         while (!todo.empty()) {
@@ -303,12 +285,12 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
             expr * arg1 = ite->get_arg(1);
             expr * arg2 = ite->get_arg(2);
 
-            if (m().is_ite(arg1) && arg1->get_ref_count() == 1) // do not apply on shared terms, since it may blowup
+            if (m().is_ite(arg1) && arg1->get_ref_count() == 1) // do not apply on shared terms, since it may blow up
                 todo.push_back(to_app(arg1));
             else if (!m().is_value(arg1))
                 return false;
 
-            if (m().is_ite(arg2) && arg2->get_ref_count() == 1) // do not apply on shared terms, since it may blowup
+            if (m().is_ite(arg2) && arg2->get_ref_count() == 1) // do not apply on shared terms, since it may blow up
                 todo.push_back(to_app(arg2));
             else if (!m().is_value(arg2))
                 return false;
@@ -319,7 +301,7 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
     br_status pull_ite(func_decl * f, unsigned num, expr * const * args, expr_ref & result) {
         if (num == 2 && m().is_bool(f->get_range()) && !m().is_bool(args[0])) {
             if (m().is_ite(args[0])) {
-                if (m().is_value(args[1]))
+                if (m().is_value(args[1]) && args[0]->get_ref_count() == 1) 
                     return pull_ite_core<false>(f, to_app(args[0]), to_app(args[1]), result);
                 if (m().is_ite(args[1]) && to_app(args[0])->get_arg(0) == to_app(args[1])->get_arg(0)) {
                     // (p (ite C A1 B1) (ite C A2 B2)) --> (ite (p A1 A2) (p B1 B2))
@@ -329,17 +311,17 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
                     return BR_REWRITE2;
                 }
             }
-            if (m().is_ite(args[1]) && m().is_value(args[0]))
+            if (m().is_ite(args[1]) && m().is_value(args[0]) && args[1]->get_ref_count() == 1)
                 return pull_ite_core<true>(f, to_app(args[1]), to_app(args[0]), result);
         }
         family_id fid = f->get_family_id();
         if (num == 2 && (fid == m().get_basic_family_id() || fid == m_a_rw.get_fid() || fid == m_bv_rw.get_fid())) {
             // (f v3 (ite c v1 v2)) --> (ite v (f v3 v1) (f v3 v2))
-            if (m().is_value(args[0]) && is_ite_value_tree(args[1]))
+            if (m().is_value(args[0]) && is_ite_value_tree(args[1])) 
                 return pull_ite_core<true>(f, to_app(args[1]), to_app(args[0]), result);
 
             // (f (ite c v1 v2) v3) --> (ite v (f v1 v3) (f v2 v3))
-            if (m().is_value(args[1]) && is_ite_value_tree(args[0]))
+            if (m().is_value(args[1]) && is_ite_value_tree(args[0])) 
                 return pull_ite_core<false>(f, to_app(args[0]), to_app(args[1]), result);
         }
         return BR_FAILED;
@@ -627,7 +609,7 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
                 count_down_subterm_references(result, reference_map);
 
                 // Any term that was newly introduced by the rewrite step is only referenced within / reachable from the result term.
-                for (auto kv : reference_map) {
+                for (auto const& kv : reference_map) {
                     if (kv.m_value == 0) {
                         m().trace_stream() << "[attach-enode] #" << kv.m_key->get_id() << " 0\n";
                     }
@@ -668,6 +650,10 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
             else
                 st = pull_ite(result);
         }
+        if (st == BR_FAILED && f->get_family_id() == null_family_id && is_partial_eq(f)) {
+            st = m_ar_rw.mk_app_core(f,  num, args, result);
+        }
+
         CTRACE("th_rewriter_step", st != BR_FAILED,
                tout << f->get_name() << "\n";
                for (unsigned i = 0; i < num; i++) tout << mk_ismt2_pp(args[i], m()) << "\n";
@@ -678,20 +664,90 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
     expr_ref mk_app(func_decl* f, unsigned num_args, expr* const* args) {
         expr_ref result(m());
         proof_ref pr(m());
-        if (BR_FAILED == reduce_app(f, num_args, args, result, pr)) {
+        if (BR_FAILED == reduce_app(f, num_args, args, result, pr)) 
             result = m().mk_app(f, num_args, args);
-        }
         return result;
     }
+
+    br_status reduce_eq(expr* a, expr* b, expr_ref& result) {
+        family_id s_fid = a->get_sort()->get_family_id();
+        br_status st = BR_FAILED;
+        if (s_fid == m_a_rw.get_fid())
+            st = m_a_rw.mk_eq_core(a, b, result);
+        else if (s_fid == m_bv_rw.get_fid())
+            st = m_bv_rw.mk_eq_core(a, b, result);
+        else if (s_fid == m_dt_rw.get_fid())
+            st = m_dt_rw.mk_eq_core(a, b, result);
+        else if (s_fid == m_f_rw.get_fid())
+            st = m_f_rw.mk_eq_core(a, b, result);
+        else if (s_fid == m_ar_rw.get_fid())
+            st = m_ar_rw.mk_eq_core(a, b, result);
+        else if (s_fid == m_seq_rw.get_fid())
+            st = m_seq_rw.mk_eq_core(a, b, result);
+        if (st != BR_FAILED)
+            return st;
+        st = extended_bv_eq(a, b, result);
+        if (st != BR_FAILED)
+            return st;        
+        return apply_tamagotchi(a, b, result);        
+    }
+
+    br_status extended_bv_eq(expr* a, expr* b, expr_ref& result) {
+        if (m_bv_util.is_bv2int(a) || m_bv_util.is_bv2int(b))
+            return m_bv_rw.mk_eq_bv2int(a, b, result);
+        return BR_FAILED;        
+    }
+
+    expr_ref mk_eq(expr* a, expr* b) {
+        expr_ref result(m());
+        br_status st = reduce_eq(a, b, result);
+        if (BR_FAILED == st)
+            st = m_b_rw.mk_eq_core(a, b, result);
+        if (BR_FAILED == st)
+            result = m().mk_eq(a, b);
+        return result;
+    }
+
+    /**
+     * Apply substitution on pattern expressions.
+     * It happens only very rarely that this operation has an effect.
+     * To avoid expensive calls to expr_safe_replace we check with a pre-filter
+     * whether the substitution possibly could apply.
+     */
 
     void apply_subst(ptr_buffer<expr>& patterns) {
         if (!m_subst)
             return;
         if (patterns.empty())
             return;
+        if (m_subst->sub().empty())
+            return;
+        if (m_new_mark) {
+            m_marks.reset();
+            for (auto const& [k, v] : m_subst->sub())
+                m_marks.mark(k);
+            m_new_mark = false;
+        }
+        struct has_mark {
+            expr_mark& m_marks;
+            bool found = false;
+            has_mark(expr_mark& m) : m_marks(m) {}
+            void operator()(quantifier* q) {
+                found = true;
+            }
+            void operator()(expr* e) {
+                found |= m_marks.is_marked(e);
+            }            
+        };
+        has_mark has_mark(m_marks);
+        for (expr* p : patterns)
+            quick_for_each_expr(has_mark, m_visited, p);
+        m_visited.reset();
+        if (!has_mark.found)
+            return;
         if (m_new_subst) {
             m_rep.reset();
-            for (auto kv : m_subst->sub())
+            for (auto const& kv : m_subst->sub())
                 m_rep.insert(kv.m_key, kv.m_value);
             m_new_subst = false;
         }
@@ -774,10 +830,8 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
             }
         }
         SASSERT(old_q->get_sort() == q1->get_sort());
-        result = elim_unused_vars(m(), q1, params_ref());
+        result = m_elim_unused_vars(q1);        
 
-
-        TRACE("reduce_quantifier", tout << "after elim_unused_vars:\n" << result << "\n";);
 
         result_pr = nullptr;
         if (m().proofs_enabled()) {
@@ -786,6 +840,33 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
                 p2 = m().mk_elim_unused_vars(q1, result);
             result_pr = m().mk_transitivity(p1, p2);
         }
+
+        TRACE("reduce_quantifier", tout << "after elim_unused_vars:\n" << result << " " << result_pr << "\n" ;);
+
+        proof_ref p2(m());
+        expr_ref r(m());
+
+        bool der_change = false;
+        if (m_enable_der && is_quantifier(result) && to_quantifier(result)->get_num_patterns() == 0) {
+            m_der(to_quantifier(result), r, p2);
+            der_change = result.get() != r.get();
+            if (m().proofs_enabled() && der_change)
+                result_pr = m().mk_transitivity(result_pr, p2);
+
+            result = r;
+        }
+
+        if (der_change && !m_nested_der) {
+            th_rewriter rw(m());
+            params_ref p;
+            p.set_bool("nested_der", true);
+            rw.updt_params(p);
+            rw(result, r, p2);
+            if (m().proofs_enabled() && result.get() != r.get()) 
+                result_pr = m().mk_transitivity(result_pr, p2);
+            result = r;
+        }
+
         SASSERT(old_q->get_sort() == result->get_sort());
         return true;
     }
@@ -799,14 +880,16 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
         m_f_rw(m, p),
         m_dl_rw(m),
         m_pb_rw(m),
-        m_seq_rw(m),
+        m_seq_rw(m, p),
+        m_char_rw(m),
         m_rec_rw(m),
         m_a_util(m),
         m_bv_util(m),
+        m_der(m),
         m_rep(m),
+        m_elim_unused_vars(m, params_ref()),
         m_pinned(m),
-        m_used_dependencies(m),
-        m_subst(nullptr) {
+        m_used_dependencies(m) {
         updt_local_params(p);
     }
 
@@ -814,6 +897,7 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
         reset();
         m_subst = s;
         m_new_subst = true;
+        m_new_mark = true;
     }
 
     void reset() {
@@ -845,6 +929,10 @@ struct th_rewriter::imp : public rewriter_tpl<th_rewriter_cfg> {
         return m_cfg.mk_app(f, sz, args);
     }
 
+    expr_ref mk_eq(expr* a, expr* b) {
+        return m_cfg.mk_eq(a, b);
+    }
+
     void set_solver(expr_solver* solver) {
         m_cfg.m_seq_rw.set_solver(solver);
     }
@@ -860,8 +948,8 @@ ast_manager & th_rewriter::m() const {
 }
 
 void th_rewriter::updt_params(params_ref const & p) {
-    m_params = p;
-    m_imp->cfg().updt_params(p);
+    m_params.append(p);
+    m_imp->cfg().updt_params(m_params);
 }
 
 void th_rewriter::get_param_descrs(param_descrs & r) {
@@ -870,6 +958,14 @@ void th_rewriter::get_param_descrs(param_descrs & r) {
     bv_rewriter::get_param_descrs(r);
     array_rewriter::get_param_descrs(r);
     rewriter_params::collect_param_descrs(r);
+}
+
+void th_rewriter::set_flat_and_or(bool f) {
+    m_imp->cfg().m_b_rw.set_flat_and_or(f);
+}
+
+void th_rewriter::set_order_eq(bool f) {
+    m_imp->cfg().m_b_rw.set_order_eq(f);
 }
 
 th_rewriter::~th_rewriter() {
@@ -884,7 +980,6 @@ unsigned th_rewriter::get_num_steps() const {
     return m_imp->get_num_steps();
 }
 
-
 void th_rewriter::cleanup() {
     ast_manager & m = m_imp->m();
     m_imp->~imp();
@@ -897,17 +992,41 @@ void th_rewriter::reset() {
 }
 
 void th_rewriter::operator()(expr_ref & term) {
-    expr_ref result(term.get_manager());
-    m_imp->operator()(term, result);
-    term = std::move(result);
+    expr_ref result(term.get_manager());    
+    try {
+        m_imp->operator()(term, result);
+        term = std::move(result);
+    }
+    catch (...) {
+        if (!term.get_manager().inc())
+            return;
+        throw;
+    }
 }
 
 void th_rewriter::operator()(expr * t, expr_ref & result) {
-    m_imp->operator()(t, result);
+    try {
+        m_imp->operator()(t, result);
+    }
+    catch (...) {
+        result = t;
+        if (!result.get_manager().inc())
+            return;
+        throw;
+    }
 }
 
 void th_rewriter::operator()(expr * t, expr_ref & result, proof_ref & result_pr) {
-    m_imp->operator()(t, result, result_pr);
+    try {
+        m_imp->operator()(t, result, result_pr);
+    }
+    catch (...) {
+        result = t;
+        result_pr = nullptr;
+        if (!result.get_manager().inc())
+            return;
+        throw;
+    }
 }
 
 expr_ref th_rewriter::operator()(expr * n, unsigned num_bindings, expr * const * bindings) {
@@ -932,6 +1051,10 @@ void th_rewriter::reset_used_dependencies() {
 
 expr_ref th_rewriter::mk_app(func_decl* f, unsigned num_args, expr* const* args) {
     return m_imp->mk_app(f, num_args, args);
+}
+
+expr_ref th_rewriter::mk_eq(expr* a, expr* b) {
+    return m_imp->mk_eq(a, b);
 }
 
 void th_rewriter::set_solver(expr_solver* solver) {

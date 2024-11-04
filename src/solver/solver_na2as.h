@@ -25,13 +25,11 @@ Notes:
 
 class solver_na2as : public solver {
  protected:
-    ast_manager &      m;
     expr_ref_vector    m_assumptions;
     unsigned_vector    m_scopes;
     void restore_assumptions(unsigned old_sz);
 public:
     solver_na2as(ast_manager & m);
-    ~solver_na2as() override;
 
     void assert_expr_core2(expr * t, expr * a) override;
 

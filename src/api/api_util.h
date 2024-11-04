@@ -19,6 +19,7 @@ Revision History:
 
 #include "util/params.h"
 #include "util/lbool.h"
+#include "util/mutex.h"
 #include "ast/ast.h"
 
 #define Z3_TRY try {
@@ -34,12 +35,12 @@ namespace api {
 
     // Generic wrapper for ref-count objects exposed by the API
     class object {
-        unsigned m_ref_count;
+        atomic<unsigned> m_ref_count;
         unsigned m_id;
         context& m_context;
     public:
         object(context& c);
-        virtual ~object() {}
+        virtual ~object() = default;
         unsigned ref_count() const { return m_ref_count; }
         unsigned id() const { return m_id; }
         void inc_ref();
@@ -87,7 +88,6 @@ inline lbool    to_lbool(Z3_lbool b) { return static_cast<lbool>(b); }
 struct Z3_params_ref : public api::object {
     params_ref m_params;
     Z3_params_ref(api::context& c): api::object(c) {}
-    ~Z3_params_ref() override {}
 };
 
 inline Z3_params_ref * to_params(Z3_params p) { return reinterpret_cast<Z3_params_ref *>(p); }
@@ -97,7 +97,6 @@ inline params_ref& to_param_ref(Z3_params p) { return p == nullptr ? const_cast<
 struct Z3_param_descrs_ref : public api::object {
     param_descrs m_descrs;
     Z3_param_descrs_ref(api::context& c): api::object(c) {}
-    ~Z3_param_descrs_ref() override {}
 };
 
 inline Z3_param_descrs_ref * to_param_descrs(Z3_param_descrs p) { return reinterpret_cast<Z3_param_descrs_ref *>(p); }
@@ -111,6 +110,7 @@ inline param_descrs * to_param_descrs_ptr(Z3_param_descrs p) { return p == nullp
     Z3_TRY;                                                     \
     RESET_ERROR_CODE();                                         \
     EXTRA_CODE;                                                 \
+    CHECK_IS_EXPR(n, nullptr);                                  \
     expr * _n = to_expr(n);                                     \
     ast* a = mk_c(c)->m().mk_app(FID, OP, 0, 0, 1, &_n);        \
     mk_c(c)->save_ast_trail(a);                                 \
@@ -128,6 +128,8 @@ Z3_ast Z3_API NAME(Z3_context c, Z3_ast n) {    \
     Z3_TRY;                                                     \
     RESET_ERROR_CODE();                                         \
     EXTRA_CODE;                                                 \
+    CHECK_IS_EXPR(n1, nullptr);                                 \
+    CHECK_IS_EXPR(n2, nullptr);                                 \
     expr * args[2] = { to_expr(n1), to_expr(n2) };              \
     ast* a = mk_c(c)->m().mk_app(FID, OP, 0, 0, 2, args);       \
     mk_c(c)->save_ast_trail(a);                                 \
@@ -145,6 +147,9 @@ Z3_ast Z3_API NAME(Z3_context c, Z3_ast n1, Z3_ast n2) {        \
     Z3_TRY;                                                     \
     RESET_ERROR_CODE();                                         \
     EXTRA_CODE;                                                 \
+    CHECK_IS_EXPR(n1, nullptr);                                 \
+    CHECK_IS_EXPR(n2, nullptr);                                 \
+    CHECK_IS_EXPR(n3, nullptr);                                 \
     expr * args[3] = { to_expr(n1), to_expr(n2), to_expr(n3) }; \
     ast* a = mk_c(c)->m().mk_app(FID, OP, 0, 0, 3, args);       \
     mk_c(c)->save_ast_trail(a);                                 \
@@ -156,6 +161,27 @@ Z3_ast Z3_API NAME(Z3_context c, Z3_ast n1, Z3_ast n2) {        \
     Z3_ast Z3_API NAME(Z3_context c, Z3_ast n1, Z3_ast n2, Z3_ast n3) { \
     LOG_ ## NAME(c, n1, n2, n3);                                        \
     MK_TERNARY_BODY(NAME, FID, OP, EXTRA_CODE);                          \
+}
+
+#define MK_FOURARY_BODY(NAME, FID, OP, EXTRA_CODE)               \
+    Z3_TRY;                                                     \
+    RESET_ERROR_CODE();                                         \
+    EXTRA_CODE;                                                 \
+    CHECK_IS_EXPR(n1, nullptr);                                 \
+    CHECK_IS_EXPR(n2, nullptr);                                 \
+    CHECK_IS_EXPR(n3, nullptr);                                 \
+    CHECK_IS_EXPR(n4, nullptr);                                 \
+    expr * args[4] = { to_expr(n1), to_expr(n2), to_expr(n3), to_expr(n4) }; \
+    ast* a = mk_c(c)->m().mk_app(FID, OP, 0, 0, 4, args);       \
+    mk_c(c)->save_ast_trail(a);                                 \
+    check_sorts(c, a);                                          \
+    RETURN_Z3(of_ast(a));                                       \
+    Z3_CATCH_RETURN(0);
+
+#define MK_FOURARY(NAME, FID, OP, EXTRA_CODE)                            \
+    Z3_ast Z3_API NAME(Z3_context c, Z3_ast n1, Z3_ast n2, Z3_ast n3, Z3_ast n4) { \
+    LOG_ ## NAME(c, n1, n2, n3, n4);                                        \
+    MK_FOURARY_BODY(NAME, FID, OP, EXTRA_CODE);                          \
 }
 
 #define MK_NARY(NAME, FID, OP, EXTRA_CODE)                              \

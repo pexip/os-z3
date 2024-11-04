@@ -90,11 +90,42 @@ CFLAGS="-m32" CXXFLAGS="-m32" CC=gcc CXX=g++ cmake ../
 Note like with the ``CC`` and ``CXX`` flags this must be done on the very first invocation
 to CMake in the build directory.
 
+### Adding Z3 as a dependency to a CMAKE Project
+
+CMake's [FetchContent](https://cmake.org/cmake/help/latest/module/FetchContent.html) allows
+the fetching and populating of an external project. This is useful when a certain version
+of z3 is required that may not match with the system version. With the following code in the 
+cmake file of your project, z3 version 4.12.1 is downloaded to the build directory and the
+cmake targets are added to the project:
+
+```
+FetchContent_Declare(z3
+        GIT_REPOSITORY https://github.com/Z3Prover/z3
+        GIT_TAG        z3-4.12.1
+)
+FetchContent_MakeAvailable(z3)
+```
+
+The header files can be added to the included directories as follows:
+
+```
+include_directories( ${z3_SOURCE_DIR}/src/api )
+```
+
+Finally, the z3 library can be linked to a `yourTarget` using
+
+```
+target_link_libraries(yourTarget libz3)
+```
+Note that this is `libz3` not `z3` (`libz3` refers to the library target from `src/CMakeLists.txt`).
+
+
+
 ### Ninja
 
 [Ninja](https://ninja-build.org/) is a simple build system that is built for speed.
 It can be significantly faster than "UNIX Makefile"s because it is not a recursive
-build system and thus doesn't create a new process everytime it traverses into a directory.
+build system and thus doesn't create a new process every time it traverses into a directory.
 Ninja is particularly appropriate if you want fast incremental building.
 
 Basic usage is as follows:
@@ -205,7 +236,7 @@ more interactive and allow you to change various options. In both these
 tools the basic steps to follow are:
 
 1. Configure.
-2. Change any options you wish. Everytime you change a set of options
+2. Change any options you wish. Every time you change a set of options
    You should configure again. This may cause new options to appear
 3. Generate.
 
@@ -246,7 +277,7 @@ The following useful options can be passed to CMake whilst configuring.
 * ``CMAKE_INSTALL_PYTHON_PKG_DIR`` - STRING. The path to install the z3 python bindings. This can be relative (to ``CMAKE_INSTALL_PREFIX``) or absolute.
 * ``CMAKE_INSTALL_Z3_CMAKE_PACKAGE_DIR`` - STRING. The path to install CMake package files (e.g. ``/usr/lib/cmake/z3``).
 * ``CMAKE_INSTALL_API_BINDINGS_DOC`` - STRING. The path to install documentation for API bindings.
-* ``PYTHON_EXECUTABLE`` - STRING. The python executable to use during the build.
+* ``Python3_EXECUTABLE`` - STRING. The python executable to use during the build.
 * ``Z3_ENABLE_TRACING_FOR_NON_DEBUG`` - BOOL. If set to ``TRUE`` enable tracing in non-debug builds, if set to ``FALSE`` disable tracing in non-debug builds. Note in debug builds tracing is always enabled.
 * ``Z3_BUILD_LIBZ3_SHARED`` - BOOL. If set to ``TRUE`` build libz3 as a shared library otherwise build as a static library.
 * ``Z3_ENABLE_EXAMPLE_TARGETS`` - BOOL. If set to ``TRUE`` add the build targets for building the API examples.
@@ -272,7 +303,7 @@ The following useful options can be passed to CMake whilst configuring.
 * ``Z3_ENABLE_CFI`` - BOOL. If set to ``TRUE`` will enable Control Flow Integrity security checks. This is only supported by MSVC and Clang and will
     fail on other compilers. This requires Z3_LINK_TIME_OPTIMIZATION to also be enabled.
 * ``Z3_API_LOG_SYNC`` - BOOL. If set to ``TRUE`` will enable experimental API log sync feature.
-* ``WARNINGS_AS_ERRORS`` - STRING. If set to ``TRUE`` compiler warnings will be treated as errors. If set to ``False`` compiler warnings will not be treated as errors.
+* ``WARNINGS_AS_ERRORS`` - STRING. If set to ``ON`` compiler warnings will be treated as errors. If set to ``OFF`` compiler warnings will not be treated as errors.
     If set to ``SERIOUS_ONLY`` a subset of compiler warnings will be treated as errors.
 * ``Z3_C_EXAMPLES_FORCE_CXX_LINKER`` - BOOL. If set to ``TRUE`` the C API examples will request that the C++ linker is used rather than the C linker.
 * ``Z3_BUILD_EXECUTABLE`` - BOOL. If set to ``TRUE`` build the z3 executable. Defaults to ``TRUE`` unless z3 is being built as a submodule in which case it defaults to ``FALSE``.
@@ -317,7 +348,7 @@ These notes are help developers and packagers of Z3.
 ### Install/Uninstall
 
 Install and uninstall targets are supported. Use ``CMAKE_INSTALL_PREFIX`` to
-set the install prefix. If you also need need to control which directories are
+set the install prefix. If you also need to control which directories are
 used for install set the documented ``CMAKE_INSTALL_*`` options.
 
 To install run

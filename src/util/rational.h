@@ -30,6 +30,10 @@ class rational {
     
     static synch_mpq_manager & m() { return *g_mpq_manager; }
 
+    void display_hex(std::ostream & out, unsigned num_bits) const { SASSERT(is_int()); m().display_hex(out, m_val.numerator(), num_bits); }
+
+    void display_bin(std::ostream& out, unsigned num_bits) const { SASSERT(is_int()); m().display_bin(out, m_val.numerator(), num_bits);  }
+
 public:
     static void initialize();
     static void finalize();
@@ -37,8 +41,8 @@ public:
       ADD_INITIALIZER('rational::initialize();')
       ADD_FINALIZER('rational::finalize();')
     */
-    rational() {}
-    
+    rational() = default;
+
     rational(rational const & r) { m().set(m_val, r.m_val); }
     rational(rational&&) = default;
 
@@ -55,6 +59,8 @@ public:
     explicit rational(double  z) { UNREACHABLE(); }
     
     explicit rational(char const * v) { m().set(m_val, v); }
+    
+    explicit rational(unsigned const * v, unsigned sz) { m().set(m_val, sz, v); }
 
     struct i64 {};
     rational(int64_t i, i64) { m().set(m_val, i); }
@@ -84,7 +90,7 @@ public:
 
     struct eq_proc { bool operator()(rational const& r1, rational const& r2) const { return r1 == r2; } };
     
-    void swap(rational & n) { m().swap(m_val, n.m_val); }
+    void swap(rational & n) noexcept { m().swap(m_val, n.m_val); }
     
     std::string to_string() const { return m().to_string(m_val); }
 
@@ -94,9 +100,33 @@ public:
 
     void display_smt2(std::ostream & out) const { return m().display_smt2(out, m_val, false); }
 
-    void display_hex(std::ostream & out, unsigned num_bits) const { SASSERT(is_int()); return m().display_hex(out, m_val.numerator(), num_bits); }
 
-    void display_bin(std::ostream & out, unsigned num_bits) const { SASSERT(is_int()); return m().display_bin(out, m_val.numerator(), num_bits); }
+    struct as_hex_wrapper {
+        rational const& r;
+        unsigned bw;
+    };
+
+    as_hex_wrapper as_hex(unsigned bw) const { return as_hex_wrapper{*this, bw}; }
+
+    friend inline std::ostream& operator<<(std::ostream& out, as_hex_wrapper const& ab) {
+        ab.r.display_hex(out, ab.bw);
+        return out;
+    }
+
+
+
+    struct as_bin_wrapper {
+        rational const& r;
+        unsigned bw;
+    };
+
+    as_bin_wrapper as_bin(unsigned bw) const { return as_bin_wrapper{*this, bw}; }
+
+    friend inline std::ostream& operator<<(std::ostream& out, as_bin_wrapper const& ab) {
+        ab.r.display_bin(out, ab.bw);
+        return out;
+    }
+
 
     bool is_uint64() const { return m().is_uint64(m_val); }
 
@@ -138,25 +168,25 @@ public:
         m().set(m_val, r.m_val);
         return *this;
     }
-private:
-    rational & operator=(bool) {
-        UNREACHABLE(); return *this;
-    }
-    inline rational operator*(bool  r1) const {
-        UNREACHABLE();
-        return *this;
-    }
 
-public:
+    rational & operator=(bool) = delete;
+    rational operator*(bool  r1) const = delete;
+
     rational & operator=(int v) {
         m().set(m_val, v);
         return *this;
     }
-    rational & operator=(double v) { UNREACHABLE(); return *this; }
+    rational & operator=(double v) = delete;
 
     friend inline rational numerator(rational const & r) { rational result; m().get_numerator(r.m_val, result.m_val); return result; }
     
     friend inline rational denominator(rational const & r) { rational result; m().get_denominator(r.m_val, result.m_val); return result; }
+
+    friend inline rational inv(rational const & r) {
+        rational result;
+        m().inv(r.m_val, result.m_val);
+        return result;
+    }
     
     rational & operator+=(rational const & r) { 
         m().add(m_val, r.m_val, m_val);
@@ -173,6 +203,10 @@ public:
         return *this; 
     }
 
+    rational& operator-=(int r) {
+        (*this) -= rational(r);
+        return *this;
+    }
 
     rational & operator*=(rational const & r) {
         m().mul(m_val, r.m_val, m_val);
@@ -223,14 +257,26 @@ public:
         return r;
     }
 
+    friend inline rational machine_div2k(rational const & r1, unsigned k) {
+        rational r;
+        rational::m().machine_idiv2k(r1.m_val, k, r.m_val);
+        return r;
+    }
+
     friend inline rational mod(rational const & r1, rational const & r2) {
         rational r;
         rational::m().mod(r1.m_val, r2.m_val, r.m_val);
         return r;
     }
-
+    
     friend inline void mod(rational const & r1, rational const & r2, rational & r) {
         rational::m().mod(r1.m_val, r2.m_val, r.m_val);
+    }
+
+    friend inline rational mod2k(rational const & a, unsigned k) {
+        if (a.is_nonneg() && a.is_int() && a.bitsize() <= k) 
+            return a;
+        return mod(a, power_of_two(k));
     }
 
     friend inline rational operator%(rational const & r1, rational const & r2) {
@@ -333,11 +379,17 @@ public:
 
     static rational power_of_two(unsigned k);
 
-    bool is_power_of_two(unsigned & shift) {
+    bool is_power_of_two(unsigned & shift) const {
+        return m().is_power_of_two(m_val, shift);
+    }
+    
+    bool is_power_of_two() const {
+        unsigned shift = 0;
         return m().is_power_of_two(m_val, shift);
     }
 
-    bool mult_inverse(unsigned num_bits, rational & result);
+    bool mult_inverse(unsigned num_bits, rational & result) const;
+    rational pseudo_inverse(unsigned num_bits) const;
 
     static rational const & zero() {
         return m_zero;
@@ -465,6 +517,18 @@ public:
         return get_num_digits(rational(10));
     }
 
+    /**
+     * \brief Return the biggest k s.t. 2^k <= a.
+     * \remark Return 0 if a is not positive.
+     */
+    unsigned prev_power_of_two() const { return m().prev_power_of_two(m_val); }
+
+    /**
+     * \brief Return the smallest k s.t. a <= 2^k.
+     * \remark Return 0 if a is not positive.
+     */
+    unsigned next_power_of_two() const { return m().next_power_of_two(m_val); }
+
     bool get_bit(unsigned index) const {
         return m().get_bit(m_val, index);
     }
@@ -475,6 +539,15 @@ public:
         unsigned k = 0;
         for (; !get_bit(k); ++k); 
         return k;
+    }
+
+    /** Number of trailing zeros in an N-bit representation */
+    unsigned parity(unsigned num_bits) const {
+        SASSERT(!is_neg());
+        SASSERT(*this < rational::power_of_two(num_bits));
+        if (is_zero())
+            return num_bits;
+        return trailing_zeros();
     }
 
     static bool limit_denominator(rational &num, rational const& limit);
@@ -624,4 +697,8 @@ inline rational gcd(rational const & r1, rational const & r2, rational & a, rati
   rational result;
   rational::m().gcd(r1.m_val, r2.m_val, a.m_val, b.m_val, result.m_val);
   return result;
+}
+
+inline void swap(rational& r1, rational& r2) noexcept {
+    r1.swap(r2);
 }

@@ -53,7 +53,6 @@ extern "C" {
     void Z3_API Z3_model_dec_ref(Z3_context c, Z3_model m) {
         Z3_TRY;
         LOG_Z3_model_dec_ref(c, m);
-        RESET_ERROR_CODE();
         if (m) {
             to_model(m)->dec_ref();
         }
@@ -433,14 +432,14 @@ extern "C" {
         if (mk_c(c)->get_print_mode() == Z3_PRINT_SMTLIB2_COMPLIANT) {
             model_smt2_pp(buffer, mk_c(c)->m(), *(to_model_ref(m)), 0);
             // Hack for removing the trailing '\n'
-            result = buffer.str();
+            result = std::move(buffer).str();
             if (!result.empty())
                 result.resize(result.size()-1);
         }
         else {
             model_params p;
             model_v2_pp(buffer, *(to_model_ref(m)), p.partial());
-            result = buffer.str();
+            result = std::move(buffer).str();
         }
         return mk_c(c)->mk_external_string(std::move(result));
         Z3_CATCH_RETURN(nullptr);

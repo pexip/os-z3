@@ -52,7 +52,7 @@ namespace datatype {
     class accessor {
         symbol    m_name;
         sort_ref  m_range;
-        unsigned m_index;    // reference to recursive data-type may only get resolved after all mutually recursive data-types are procssed.
+        unsigned m_index;    // reference to recursive data-type may only get resolved after all mutually recursive data-types are processed.
         constructor* m_constructor{ nullptr };
     public:
         accessor(ast_manager& m, symbol const& n, sort* range):
@@ -105,7 +105,7 @@ namespace datatype {
         class size {
             unsigned m_ref{ 0 };
         public:
-            virtual ~size() { }
+            virtual ~size() = default;
             void inc_ref() { ++m_ref; }
             void dec_ref();
             static size* mk_offset(sort_size const& s); 
@@ -198,6 +198,8 @@ namespace datatype {
         def* translate(ast_translation& tr, util& u);
     };
 
+    typedef std::pair<func_decl*, unsigned> cnstr_depth;
+
     namespace decl {
 
         class plugin : public decl_plugin {
@@ -207,14 +209,15 @@ namespace datatype {
             unsigned                 m_id_counter;
             svector<symbol>          m_def_block;
             unsigned                 m_class_id;
-            mutable bool             m_has_nested_arrays;
+            mutable bool             m_has_nested_rec;
 
             void inherit(decl_plugin* other_p, ast_translation& tr) override;
 
             void log_axiom_definitions(symbol const& s, sort * new_sort);
 
+
         public:
-            plugin(): m_id_counter(0), m_class_id(0), m_has_nested_arrays(false) {}
+            plugin(): m_id_counter(0), m_class_id(0), m_has_nested_rec(false) {}
             ~plugin() override;
 
             void finalize() override;
@@ -230,9 +233,11 @@ namespace datatype {
         
             bool is_fully_interp(sort * s) const override;
         
-            bool is_value(app* e) const override;
+            bool is_value(app* e) const override { return is_value_aux(false, e); }
         
-            bool is_unique_value(app * e) const override { return is_value(e); }
+            bool is_unique_value(app * e) const override { return is_value_aux(true, e); }
+
+            bool are_distinct(app * a, app * b) const override;
         
             void get_op_names(svector<builtin_name> & op_names, symbol const & logic) override;
                 
@@ -248,14 +253,37 @@ namespace datatype {
 
             def const& get_def(sort* s) const { return *(m_defs[datatype_name(s)]); }
             def& get_def(symbol const& s) { return *(m_defs[s]); }
+            ptr_vector<constructor> get_constructors(symbol const& s) const;
+            ptr_vector<accessor> get_accessors(symbol const& s) const;
             bool is_declared(sort* s) const { return m_defs.contains(datatype_name(s)); }
+            bool is_declared(symbol const& n) const { return m_defs.contains(n); }
             unsigned get_axiom_base_id(symbol const& s) { return m_axiom_bases[s]; }
             util & u() const;
 
-            bool has_nested_arrays() const { return m_has_nested_arrays; }
+            bool has_nested_rec() const { return m_has_nested_rec; }
+
+            void reset();
+
+
+            obj_map<sort, ptr_vector<func_decl>*>       m_datatype2constructors;
+            obj_map<sort, cnstr_depth>                  m_datatype2nonrec_constructor;
+            obj_map<func_decl, ptr_vector<func_decl>*>  m_constructor2accessors;
+            obj_map<func_decl, func_decl*>              m_constructor2recognizer;
+            obj_map<func_decl, func_decl*>              m_recognizer2constructor;
+            obj_map<func_decl, func_decl*>              m_accessor2constructor;
+            obj_map<sort, bool>                         m_is_recursive;
+            obj_map<sort, bool>                         m_is_enum;
+            mutable obj_map<sort, bool>                 m_is_fully_interp;
+            mutable ast_ref_vector* m_asts = nullptr;
+            sref_vector<param_size::size>               m_refs;
+            ptr_vector<ptr_vector<func_decl> >          m_vectors;
+            unsigned                                    m_start = 0;
+            mutable ptr_vector<sort>                    m_fully_interp_trail;
+            void add_ast(ast* a) const { if (!m_asts) m_asts = alloc(ast_ref_vector, *m_manager);  m_asts->push_back(a); }
 
         private:
-            bool is_value_visit(expr * arg, ptr_buffer<app> & todo) const;
+            bool is_value_visit(bool unique, expr * arg, ptr_buffer<app> & todo) const;
+            bool is_value_aux(bool unique, app * arg) const;
         
             func_decl * mk_update_field(
                 unsigned num_parameters, parameter const * parameters, 
@@ -289,25 +317,10 @@ namespace datatype {
         ast_manager & m;
         mutable family_id     m_family_id;
         mutable decl::plugin* m_plugin;
-        typedef std::pair<func_decl*, unsigned> cnstr_depth;
+
 
         family_id fid() const;
-                
-        obj_map<sort, ptr_vector<func_decl> *>      m_datatype2constructors;
-        obj_map<sort, cnstr_depth>                  m_datatype2nonrec_constructor;
-        obj_map<func_decl, ptr_vector<func_decl> *> m_constructor2accessors;
-        obj_map<func_decl, func_decl *>             m_constructor2recognizer;
-        obj_map<func_decl, func_decl *>             m_recognizer2constructor;
-        obj_map<func_decl, func_decl *>             m_accessor2constructor;
-        obj_map<sort, bool>                         m_is_recursive;
-        obj_map<sort, bool>                         m_is_enum;
-        mutable obj_map<sort, bool>                 m_is_fully_interp;
-        mutable ast_ref_vector                      m_asts;
-        sref_vector<param_size::size>               m_refs;
-        ptr_vector<ptr_vector<func_decl> >          m_vectors;
-        unsigned                                    m_start;
-        mutable ptr_vector<sort>                    m_fully_interp_trail;
-        
+                    
         cnstr_depth get_non_rec_constructor_core(sort * ty, ptr_vector<sort> & forbidden_set);
 
         friend class decl::plugin;
@@ -321,16 +334,16 @@ namespace datatype {
         bool is_covariant(ast_mark& mark, ptr_vector<sort>& subsorts, sort* s) const;
         def& get_def(symbol const& s) { return plugin().get_def(s); }        
         void get_subsorts(sort* s, ptr_vector<sort>& sorts) const;        
+        symbol datatype_name(sort* s) const { return s->get_parameter(0).get_symbol(); }
 
     public:
         util(ast_manager & m);
-        ~util();
         ast_manager & get_manager() const { return m; }
         // sort * mk_datatype_sort(symbol const& name, unsigned n, sort* const* params); 
         bool is_datatype(sort const* s) const { return is_sort_of(s, fid(), DATATYPE_SORT); }
         bool is_enum_sort(sort* s);
         bool is_recursive(sort * ty);
-        bool is_recursive_array(sort * ty);
+        bool is_recursive_nested(sort * ty);
         bool is_constructor(func_decl * f) const { return is_decl_of(f, fid(), OP_DT_CONSTRUCTOR); }
         bool is_recognizer(func_decl * f) const { return is_recognizer0(f) || is_is(f); }
         bool is_recognizer0(func_decl * f) const { return is_decl_of(f, fid(), OP_DT_RECOGNISER); }
@@ -361,7 +374,7 @@ namespace datatype {
         func_decl * get_accessor_constructor(func_decl * accessor);
         func_decl * get_recognizer_constructor(func_decl * recognizer) const;
         func_decl * get_update_accessor(func_decl * update) const;
-        bool has_nested_arrays() const { return plugin().has_nested_arrays(); }
+        bool has_nested_rec() const { return plugin().has_nested_rec(); }
         family_id get_family_id() const { return fid(); }
         decl::plugin& plugin() const;
         bool are_siblings(sort * s1, sort * s2);
@@ -369,6 +382,7 @@ namespace datatype {
         bool is_constructor_of(unsigned num_params, parameter const* params, func_decl* f);
         void reset();
         bool is_declared(sort* s) const;
+        bool is_declared(symbol const& n) const;
         void display_datatype(sort *s, std::ostream& strm);
         bool is_fully_interp(sort * s) const;
         sort_ref_vector datatype_params(sort * s) const;

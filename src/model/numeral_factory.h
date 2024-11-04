@@ -25,7 +25,6 @@ Revision History:
 class numeral_factory : public simple_factory<rational> {
 public:
     numeral_factory(ast_manager & m, family_id fid):simple_factory<rational>(m, fid) {}
-    ~numeral_factory() override {}
 };    
 
 class arith_factory : public numeral_factory {
@@ -35,7 +34,6 @@ class arith_factory : public numeral_factory {
 
 public:
     arith_factory(ast_manager & m);
-    ~arith_factory() override;
 
     app * mk_num_value(rational const & val, bool is_int);
 };
@@ -47,7 +45,6 @@ class bv_factory : public numeral_factory {
 
 public:
     bv_factory(ast_manager & m);
-    ~bv_factory() override;
 
     app * mk_num_value(rational const & val, unsigned bv_size);
 };

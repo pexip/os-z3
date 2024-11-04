@@ -22,11 +22,11 @@ Copyright (c) 2015 Microsoft Corporation
 /**
    \defgroup capi_ex C API examples
 */
-/*@{*/
+/**@{*/
 /**
    @name Auxiliary Functions
 */
-/*@{*/
+/**@{*/
 
 /**
    \brief exit gracefully in case of error.
@@ -162,6 +162,15 @@ Z3_ast mk_bool_var(Z3_context ctx, const char * name)
 Z3_ast mk_int_var(Z3_context ctx, const char * name)
 {
     Z3_sort ty = Z3_mk_int_sort(ctx);
+    return mk_var(ctx, name, ty);
+}
+
+/**
+   \brief Create a string variable using the given name.
+*/
+Z3_ast mk_string_var(Z3_context ctx, const char * name)
+{
+    Z3_sort ty = Z3_mk_string_sort(ctx);
     return mk_var(ctx, name, ty);
 }
 
@@ -561,7 +570,7 @@ void display_ast(Z3_context c, FILE * out, Z3_ast v)
     }
     case Z3_QUANTIFIER_AST: {
         fprintf(out, "quantifier");
-        ;
+        break;
     }
     default:
         fprintf(out, "#unknown");
@@ -694,12 +703,12 @@ void display_version()
     Z3_get_version(&major, &minor, &build, &revision);
     printf("Z3 %d.%d.%d.%d\n", major, minor, build, revision);
 }
-/*@}*/
+/**@}*/
 
 /**
    @name Examples
 */
-/*@{*/
+/**@{*/
 /**
    \brief "Hello world" example: create a Z3 logical context, and delete it.
 */
@@ -1615,7 +1624,7 @@ void error_code_example2() {
         Z3_del_config(cfg);
 
         x   = mk_int_var(ctx, "x");
-        y   = mk_bool_var(ctx, "y");
+        y   = mk_string_var(ctx, "y");
         printf("before Z3_mk_iff\n");
         /* the next call will produce an error */
         app = Z3_mk_iff(ctx, x, y);
@@ -2947,8 +2956,30 @@ void mk_model_example() {
     Z3_del_context(ctx);
 }
 
-/*@}*/
-/*@}*/
+void divides_example()
+{
+    Z3_context ctx;
+    Z3_solver s;
+    Z3_ast x, number;
+    Z3_ast c;
+
+    ctx    = mk_context();
+    s      = mk_solver(ctx);
+
+    x      = mk_int_var(ctx, "x");
+    number = mk_int(ctx, 2);
+
+    c      = Z3_mk_divides(ctx, number, x);
+    Z3_solver_assert(ctx, s, c);
+
+    check2(ctx, s, Z3_L_TRUE);
+
+    del_solver(ctx, s);
+    Z3_del_context(ctx);
+}
+
+/**@}*/
+/**@}*/
 
 
 
@@ -2956,6 +2987,7 @@ int main() {
 #ifdef LOG_Z3_CALLS
     Z3_open_log("z3.log");
 #endif
+    divides_example();
     display_version();
     simple_example();
     demorgan();

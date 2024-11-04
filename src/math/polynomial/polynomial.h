@@ -71,6 +71,7 @@ namespace polynomial {
     template<typename ValManager, typename Value = typename ValManager::numeral>
     class var2value {
     public:
+        virtual ~var2value() = default;
         virtual ValManager & m() const = 0;
         virtual bool contains(var x) const = 0;
         virtual Value const & operator()(var x) const = 0;
@@ -100,6 +101,7 @@ namespace polynomial {
 
     struct display_var_proc {
         virtual std::ostream& operator()(std::ostream & out, var x) const { return out << "x" << x; }
+        virtual ~display_var_proc() = default;
     };
 
     class polynomial;
@@ -228,6 +230,7 @@ namespace polynomial {
             del_eh * m_next;
         public:
             del_eh():m_next(nullptr) {}
+            virtual ~del_eh() = default;
             virtual void operator()(polynomial * p) = 0;
         };
 
@@ -282,7 +285,8 @@ namespace polynomial {
         /**
            \brief Normalize coefficients by dividing by their gcd
         */
-        void gcd_simplify(polynomial* p);
+        enum ineq_type { EQ, LT, GT };
+        void gcd_simplify(polynomial_ref& p, ineq_type t);
 
         /**
            \brief Return true if \c m is the unit monomial.
@@ -918,6 +922,13 @@ namespace polynomial {
         */
         bool is_nonneg(polynomial const * p);
 
+
+        /**
+           \brief Return true if p is always greater or equal to q.
+           This is an incomplete check
+        */
+        bool ge(polynomial const* p, polynomial const* q);
+
         /**
            \brief Make sure the monomials in p are sorted using lexicographical order.
            Remark: the maximal monomial is at position 0.
@@ -928,6 +939,9 @@ namespace polynomial {
            \brief Collect variables that occur in p into xs
         */
         void vars(polynomial const * p, var_vector & xs);
+        void vars_incremental(polynomial const * p, var_vector & xs);
+        void begin_vars_incremental();
+        void end_vars_incremental(var_vector & xs);
 
         /**
            \brief Evaluate polynomial p using the assignment [x_1 -> v_1, ..., x_n -> v_n].
@@ -1016,15 +1030,14 @@ namespace polynomial {
         */
         void exact_pseudo_division_mod_d(polynomial const * p, polynomial const * q, var x, var2degree const & x2d, polynomial_ref & Q, polynomial_ref & R);
 
-        void display(std::ostream & out, monomial const * m, display_var_proc const & proc = display_var_proc(), bool use_star = true) const;
+        std::ostream& display(std::ostream & out, monomial const * m, display_var_proc const & proc = display_var_proc(), bool use_star = true) const;
 
-        void display(std::ostream & out, polynomial const * p, display_var_proc const & proc = display_var_proc(), bool use_star = false) const;
+        std::ostream& display(std::ostream & out, polynomial const * p, display_var_proc const & proc = display_var_proc(), bool use_star = false) const;
 
-        void display_smt2(std::ostream & out, polynomial const * p, display_var_proc const & proc = display_var_proc()) const;
+        std::ostream& display_smt2(std::ostream & out, polynomial const * p, display_var_proc const & proc = display_var_proc()) const;
 
         friend std::ostream & operator<<(std::ostream & out, polynomial_ref const & p) {
-            p.m().display(out, p);
-            return out;
+            return p.m().display(out, p);
         }
     };
 

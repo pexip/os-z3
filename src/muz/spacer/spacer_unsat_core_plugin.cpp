@@ -73,7 +73,7 @@ namespace spacer {
                 // the current step needs to be interpolated:
                 expr* fact = m.get_fact(pf);
                 // if we trust the current step and we are able to use it
-                if (m_ctx.is_b_pure (pf) && (m.is_asserted(pf) || spacer::is_literal(m, fact))) {
+                if (m_ctx.is_b_pure (pf) && (m.is_asserted(pf) || spacer::is_literal(m, fact)) && !spacer::contains_defaults(fact, m)) {
                     // just add it to the core
                     m_ctx.add_lemma_to_core(fact);
                 }
@@ -97,7 +97,6 @@ namespace spacer {
         // XXX this assertion should be true so there is no need to check for it
         SASSERT (!m_ctx.is_closed (step));
         func_decl* d = step->get_decl();
-        symbol sym;
         TRACE("spacer.farkas",
               tout << "looking at: " << mk_pp(step, m) << "\n";);
         if (!m_ctx.is_closed(step) && is_farkas_lemma(m, step)) {
@@ -239,9 +238,8 @@ namespace spacer {
         SASSERT(m_ctx.is_b(step));
 
         func_decl* d = step->get_decl();
-        symbol sym;
         if (!m_ctx.is_closed(step) && // if step is not already interpolated
-           is_farkas_lemma(m, step)) {
+            is_farkas_lemma(m, step)) {
             SASSERT(d->get_num_parameters() == m.get_num_parents(step) + 2);
             SASSERT(m.has_fact(step));
 
@@ -396,8 +394,8 @@ namespace spacer {
                 matrix.set(i, map[pair.second], pair.first);
             }
         }
-        matrix.print_matrix();
 
+        IF_VERBOSE(10, matrix.display(verbose_stream()););
         // 3. normalize matrix to integer values
         matrix.normalize();
 

@@ -22,7 +22,7 @@ Revision History:
 #include "smt/theory_arith.h"
 #include "smt/smt_farkas_util.h"
 #include "ast/rewriter/th_rewriter.h"
-#include "tactic/generic_model_converter.h"
+#include "ast/converters/generic_model_converter.h"
 
 namespace smt {
 
@@ -370,8 +370,8 @@ namespace smt {
 
     
     template<typename Ext>
-    void theory_arith<Ext>::bound::display(theory_arith<Ext> const& th, std::ostream& out) const {
-        out << "v" << get_var() << " " << get_bound_kind() << " " << get_value();
+    std::ostream& theory_arith<Ext>::bound::display(theory_arith<Ext> const& th, std::ostream& out) const {
+        return out << "v" << get_var() << " " << get_bound_kind() << " " << get_value();
     }
 
 
@@ -414,11 +414,10 @@ namespace smt {
     }
 
     template<typename Ext>
-    void theory_arith<Ext>::atom::display(theory_arith<Ext> const& th, std::ostream& out) const {
+    std::ostream& theory_arith<Ext>::atom::display(theory_arith<Ext> const& th, std::ostream& out) const {
         literal l(get_bool_var(), !m_is_true);
-        // out << "v" << bound::get_var() << " " << bound::get_bound_kind() << " " << get_k() << " ";
-        // out << l << ":";
         th.ctx.display_detailed_literal(out, l);
+        return out;
     }
 
     // -----------------------------------
@@ -428,10 +427,10 @@ namespace smt {
     // -----------------------------------
 
     template<typename Ext>
-    void theory_arith<Ext>::eq_bound::display(theory_arith<Ext> const& th, std::ostream& out) const {        
+    std::ostream& theory_arith<Ext>::eq_bound::display(theory_arith<Ext> const& th, std::ostream& out) const {
         ast_manager& m = th.get_manager();
-        out << "#" << m_lhs->get_owner_id() << " " << mk_pp(m_lhs->get_expr(), m) << " = "
-            << "#" << m_rhs->get_owner_id() << " " << mk_pp(m_rhs->get_expr(), m);
+        return out << "#" << m_lhs->get_owner_id() << " " << mk_pp(m_lhs->get_expr(), m) << " = "
+                   << "#" << m_rhs->get_owner_id() << " " << mk_pp(m_rhs->get_expr(), m);
     }
 
     // -----------------------------------
@@ -752,7 +751,7 @@ namespace smt {
     }
 
     template<typename Ext>
-    void theory_arith<Ext>::derived_bound::display(theory_arith<Ext> const& th, std::ostream& out) const {
+    std::ostream& theory_arith<Ext>::derived_bound::display(theory_arith<Ext> const& th, std::ostream& out) const {
         ast_manager& m = th.get_manager();
         out << "v" << bound::get_var() << " " << bound::get_bound_kind() << " " << bound::get_value() << "\n";
         out << "expr: " << mk_pp(th.var2expr(bound::get_var()), m) << "\n";
@@ -765,8 +764,9 @@ namespace smt {
                 << "#" << b->get_owner_id() << " " << mk_pp(b->get_expr(), m) << "\n";
         }
         for (literal l : m_lits) {
-            out << l << ":"; th.ctx.display_detailed_literal(out, l) << "\n";           
+            out << l << ":"; th.ctx.display_detailed_literal(out, l) << "\n";
         }
+        return out;
     }
 
 
@@ -1554,6 +1554,7 @@ namespace smt {
             min_gain.reset();
             ++round;
 
+            (void)round;
             TRACE("opt", tout << "round: " << round << ", max: " << max << "\n"; display_row(tout, r, true); tout << "state:\n"; display(tout););
             typename vector<row_entry>::const_iterator it  = r.begin_entries();
             typename vector<row_entry>::const_iterator end = r.end_entries();
@@ -2169,9 +2170,8 @@ namespace smt {
     */
     template<typename Ext>
     bool theory_arith<Ext>::is_shared(theory_var v) const {
-        if (!m_found_underspecified_op) {
+        if (m_underspecified_ops.empty())
             return false;
-        }
         enode * n      = get_enode(v);
         enode * r      = n->get_root();
         enode_vector::const_iterator it  = r->begin_parents();
@@ -2196,39 +2196,33 @@ namespace smt {
     }
 
     template<typename Ext>
-    bool theory_arith<Ext>::assume_eqs_core() {
+    bool theory_arith<Ext>::assume_eqs() {
         // See comment in m_liberal_final_check declaration
         if (m_liberal_final_check)
             mutate_assignment();
         TRACE("assume_eq_int", display(tout););
 
         unsigned old_sz = m_assume_eq_candidates.size();
-        TRACE("func_interp_bug", display(tout););
         m_var_value_table.reset();
         bool result   = false;
         int num       = get_num_vars();
         for (theory_var v = 0; v < num; v++) {
             enode * n        = get_enode(v);
-            TRACE("func_interp_bug", tout << mk_pp(n->get_expr(), get_manager()) << " -> " << m_value[v] << " root #" << n->get_root()->get_owner_id() << " " << is_relevant_and_shared(n) << "\n";);
-            if (!is_relevant_and_shared(n)) {
+            if (!is_relevant_and_shared(n)) 
                 continue;
-            }
             theory_var other = null_theory_var;
             other = m_var_value_table.insert_if_not_there(v);
-            if (other == v) {
+            if (other == v) 
                 continue;
-            }
             enode * n2 = get_enode(other);
-            if (n->get_root() == n2->get_root()) {
+            if (n->get_root() == n2->get_root()) 
                 continue;
-            }
-            TRACE("func_interp_bug", tout << "adding to assume_eq queue #" << n->get_owner_id() << " #" << n2->get_owner_id() << "\n";);
-            m_assume_eq_candidates.push_back(std::make_pair(other, v));
+            m_assume_eq_candidates.push_back({ other , v }); 
             result = true;
         }
 
         if (result)
-            ctx.push_trail(restore_size_trail<std::pair<theory_var, theory_var>, false>(m_assume_eq_candidates, old_sz));
+            ctx.push_trail(restore_vector(m_assume_eq_candidates, old_sz));
         return delayed_assume_eqs();
     }
 
@@ -2239,22 +2233,36 @@ namespace smt {
 
         ctx.push_trail(value_trail<unsigned>(m_assume_eq_head));
         while (m_assume_eq_head < m_assume_eq_candidates.size()) {
-            std::pair<theory_var, theory_var> const & p = m_assume_eq_candidates[m_assume_eq_head];
-            theory_var v1 = p.first;
-            theory_var v2 = p.second;
+            auto const& [v1, v2] = m_assume_eq_candidates[m_assume_eq_head];
+            enode* n1 = get_enode(v1);
+            enode* n2 = get_enode(v2);
             m_assume_eq_head++;
-            CTRACE("func_interp_bug", 
-                   get_value(v1) == get_value(v2) && 
-                   get_enode(v1)->get_root() != get_enode(v2)->get_root(),
-                   tout << "assuming eq: #" << get_enode(v1)->get_owner_id() << " = #" << get_enode(v2)->get_owner_id() << "\n";);
+            CTRACE("arith",
+                   get_value(v1) == get_value(v2) && n1->get_root() != n2->get_root(),
+                   tout << "assuming eq: " << ctx.pp(n1) << " = #" << ctx.pp(n2) << "\n";);
             if (get_value(v1) == get_value(v2) && 
-                get_enode(v1)->get_root() != get_enode(v2)->get_root() &&
-                assume_eq(get_enode(v1), get_enode(v2))) {
+                n1->get_root() != n2->get_root() &&
+                assume_eq(n1, n2)) {
                 ++m_stats.m_assume_eqs;
                 return true;
             }
         }
         return false;
+    }
+
+    template<typename Ext>
+    void theory_arith<Ext>::initialize_value(expr* var, expr* value) {
+        theory_var v = expr2var(var);
+        rational r;
+        if (!m_util.is_numeral(value, r)) {
+            IF_VERBOSE(5, verbose_stream() << "numeric constant expected in initialization " << mk_pp(var, m) << " := " << mk_pp(value, m) << "\n");
+            return;
+        }
+        if (v == null_theory_var)
+            return;
+        if (is_base(v))
+            return;
+        update_value(v, inf_numeral(r));
     }
 
 

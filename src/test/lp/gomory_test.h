@@ -1,3 +1,5 @@
+#pragma once
+
 namespace lp {
 #include "math/lp/lp_utils.h"
 struct gomory_test {
@@ -128,7 +130,7 @@ struct gomory_test {
 
 
     void report_conflict_from_gomory_cut(mpq &k) {
-        lp_assert(false);
+        UNREACHABLE();
     }
 
     void adjust_term_and_k_for_some_ints_case_gomory(lar_term& t, mpq& k, mpq &lcm_den) {
@@ -187,7 +189,7 @@ struct gomory_test {
     void print_term(lar_term & t, std::ostream & out) {
         vector<std::pair<mpq, unsigned>>  row;
         for (auto p : t)
-            row.push_back(std::make_pair(p.coeff(), p.column().index()));
+            row.push_back(std::make_pair(p.coeff(), p.j()));
         print_row(out, row);
     }
     

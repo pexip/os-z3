@@ -27,7 +27,6 @@ Notes:
 #include "ast/ast_smt2_pp.h"
 #include "tactic/tactic.h"
 #include "tactic/tactical.h"
-#include "tactic/probe.h"
 #include "solver/check_sat_result.h"
 #include "cmd_context/cmd_context_to_goal.h"
 #include "cmd_context/echo_tactic.h"
@@ -36,9 +35,6 @@ probe_info::probe_info(symbol const & n, char const * d, probe * p):
     m_name(n),
     m_descr(d),
     m_probe(p) {
-}
-
-probe_info::~probe_info() {
 }
 
 class declare_tactic_cmd : public cmd {
@@ -296,9 +292,10 @@ public:
     }
 
     void execute(cmd_context & ctx) override {
-        if (!m_tactic) {
+        if (!m_tactic) 
             throw cmd_exception("apply needs a tactic argument");
-        }
+        if (ctx.ignore_check())
+            return;
         params_ref p = ctx.params().merge_default_params(ps());
         tactic_ref tref = using_params(sexpr2tactic(ctx, m_tactic), p);
         {
@@ -481,16 +478,11 @@ static tactic * mk_repeat(cmd_context & ctx, sexpr * n) {
     return repeat(t, max);
 }
 
-static tactic * mk_using_params(cmd_context & ctx, sexpr * n) {
+params_ref sexpr2params(cmd_context& ctx, sexpr * n, param_descrs const& descrs) {
     SASSERT(n->is_composite());
     unsigned num_children = n->get_num_children();
     if (num_children < 2)
         throw cmd_exception("invalid using-params combinator, at least one argument expected", n->get_line(), n->get_pos());
-    if (num_children == 2)
-        return sexpr2tactic(ctx, n->get_child(1));
-    tactic_ref t = sexpr2tactic(ctx, n->get_child(1));
-    param_descrs descrs;
-    t->collect_param_descrs(descrs);
     params_ref p;
     unsigned i = 2;
     while (i < num_children) {
@@ -535,6 +527,20 @@ static tactic * mk_using_params(cmd_context & ctx, sexpr * n) {
             throw cmd_exception("invalid using-params combinator, unsupported parameter kind");
         }
     }
+    return p;
+}
+
+static tactic * mk_using_params(cmd_context & ctx, sexpr * n) {
+    SASSERT(n->is_composite());
+    unsigned num_children = n->get_num_children();
+    if (num_children < 2)
+        throw cmd_exception("invalid using-params combinator, at least one argument expected", n->get_line(), n->get_pos());
+    if (num_children == 2)
+        return sexpr2tactic(ctx, n->get_child(1));
+    tactic_ref t = sexpr2tactic(ctx, n->get_child(1));
+    param_descrs descrs;
+    t->collect_param_descrs(descrs);
+    params_ref p = sexpr2params(ctx, n, descrs);
     return using_params(t.get(), p);
 }
 

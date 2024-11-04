@@ -4,10 +4,11 @@ Priority: optional
 Maintainer: LLVM Packaging Team <pkg-llvm-team@lists.alioth.debian.org>
 Uploaders: Fabian Wolff <fabi.wolff@arcor.de>
 Build-Depends: debhelper-compat (= 13),
-               dh-python, python3, cmake, libsimde-dev,
-               javahelper [!hppa !hurd-i386 !m68k !sh4] <!nojava>,
-               default-jdk [!hppa !hurd-i386 !m68k !sh4] <!nojava>
-Standards-Version: 4.6.0
+               cmake, libsimde-dev, python3:any, python3-setuptools,
+               dh-sequence-python3 <!nopython>,
+               dh-sequence-javahelper [!hppa !hurd-any !m68k !sh4] <!nojava>,
+               default-jdk [!hppa !hurd-any !m68k !sh4] <!nojava>
+Standards-Version: 4.7.0
 Homepage: https://github.com/Z3Prover/z3
 Vcs-Git: https://salsa.debian.org/pkg-llvm-team/z3.git
 Vcs-Browser: https://salsa.debian.org/pkg-llvm-team/z3
@@ -60,6 +61,7 @@ Description: theorem prover from Microsoft Research - development files
 Package: python3-z3
 Section: python
 Architecture: any
+Build-Profiles: <!nopython>
 Pre-Depends: ${misc:Pre-Depends}
 Depends: libz3-dev (= ${binary:Version}),
          python3-pkg-resources,
@@ -76,7 +78,7 @@ Package: libz3-java
 Build-Profiles: <!nojava>
 Section: java
 Architecture: amd64 arm64 armel armhf i386 mips mips64el mipsel powerpc ppc64el s390x alpha kfreebsd-amd64 kfreebsd-i386 powerpcspe riscv64 sparc64 x32
-Depends: libz3-jni (>= ${binary:Version}), libz3-jni (<< ${source:Version}.1~), libz3-dev, ${misc:Depends}, ${java:Depends}
+Depends: libz3-jni (>= ${binary:Version}), libz3-jni (<< ${source:Version}.1~), libz3-dev (= ${binary:Version}), ${misc:Depends}, ${java:Depends}
 Description: theorem prover from Microsoft Research - java bindings
  Z3 is a state-of-the-art theorem prover from Microsoft Research. See the z3
  package for a detailed description.

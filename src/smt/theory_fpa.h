@@ -47,8 +47,6 @@ namespace smt {
                 m_th(*th), m(th->get_manager()), m_fu(th->m_fpa_util), m_bu(th->m_bv_util),
                 m_ebits(ebits), m_sbits(sbits) {}
 
-            ~fpa_value_proc() override {}
-
             void add_dependency(enode * e) { m_deps.push_back(model_value_dependency(e)); }
 
             void get_dependencies(buffer<model_value_dependency> & result) override {
@@ -75,7 +73,6 @@ namespace smt {
                 result.append(m_deps);
             }
 
-            ~fpa_rm_value_proc() override {}
             app * mk_value(model_generator & mg, expr_ref_vector const & values) override;
         };
 
@@ -123,7 +120,6 @@ namespace smt {
 
         void attach_new_th_var(enode * n);
         void assert_cnstr(expr * e);
-
 
         enode* ensure_enode(expr* e);
         enode* get_root(expr* a) { return ensure_enode(a)->get_root(); }

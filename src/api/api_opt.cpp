@@ -15,7 +15,6 @@ Author:
 Revision History:
 
 --*/
-#include<iostream>
 #include "util/cancel_eh.h"
 #include "util/scoped_timer.h"
 #include "util/scoped_ctrl_c.h"
@@ -67,7 +66,6 @@ extern "C" {
     void Z3_API Z3_optimize_dec_ref(Z3_context c, Z3_optimize o) {
         Z3_TRY;
         LOG_Z3_optimize_dec_ref(c, o);
-        RESET_ERROR_CODE();
         if (o)
             to_optimize(o)->dec_ref();
         Z3_CATCH;
@@ -325,6 +323,7 @@ extern "C" {
         RESET_ERROR_CODE();
         Z3_stats_ref * st = alloc(Z3_stats_ref, *mk_c(c));
         to_optimize_ptr(d)->collect_statistics(st->m_stats);
+        to_optimize_ptr(d)->collect_timer_stats(st->m_stats);
         mk_c(c)->save_object(st);
         Z3_stats r = of_stats(st);
         RETURN_Z3(r);
@@ -384,8 +383,7 @@ extern "C" {
         Z3_string     s) {
         Z3_TRY;
         //LOG_Z3_optimize_from_string(c, d, s);
-        std::string str(s);
-        std::istringstream is(str);
+        std::istringstream is(s);
         Z3_optimize_from_stream(c, d, is, nullptr);
         Z3_CATCH;
     }
@@ -461,6 +459,21 @@ extern "C" {
         Z3_CATCH;
     }
 
-
+    void Z3_API Z3_optimize_set_initial_value(Z3_context c, Z3_optimize o, Z3_ast var, Z3_ast value) {
+        Z3_TRY;
+        LOG_Z3_optimize_set_initial_value(c, o, var, value);
+        RESET_ERROR_CODE();
+        if (to_expr(var)->get_sort() != to_expr(value)->get_sort()) {
+            SET_ERROR_CODE(Z3_INVALID_USAGE, "variable and value should have same sort");
+            return;
+        }
+        ast_manager& m = mk_c(c)->m();
+        if (!m.is_value(to_expr(value))) {
+            SET_ERROR_CODE(Z3_INVALID_USAGE, "a proper value was not supplied");
+            return;
+        }
+        to_optimize_ptr(o)->initialize_value(to_expr(var), to_expr(value));
+        Z3_CATCH;        
+    }
 
 };

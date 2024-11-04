@@ -40,7 +40,7 @@ namespace mbp {
             return lift_foreign(vars, lits);
         }
 
-        bool operator()(model& model, app* var, app_ref_vector& vars, expr_ref_vector& lits) {
+        bool project1(model& model, app* var, app_ref_vector& vars, expr_ref_vector& lits) {
             expr_ref val = model(var);
             SASSERT(is_app(val));
             TRACE("qe", tout << mk_pp(var, m) << " := " << val << "\n";);
@@ -169,7 +169,7 @@ namespace mbp {
                                 eqs.push_back(m.mk_eq(access(c, j, acc, b), a->get_arg(j)));
                             }
                         }
-                        if (!is_app_of(b, c)) {
+                        if (!is_app_of(b, c) && dt.get_datatype_num_constructors(c->get_range()) != 1) {                            
                             eqs.push_back(m.mk_app(rec, b));
                         }
 
@@ -231,7 +231,7 @@ namespace mbp {
             }
             func_decl* c = to_app(l)->get_decl();
             ptr_vector<func_decl> const& acc = *dt.get_constructor_accessors(c);
-            if (!is_app_of(r, c)) {
+            if (!is_app_of(r, c) && dt.get_datatype_num_constructors(c->get_range()) != 1) {
                 lits.push_back(m.mk_app(dt.get_constructor_is(c), r));
             }
             for (unsigned i = 0; i < acc.size(); ++i) {
@@ -292,16 +292,16 @@ namespace mbp {
         dealloc(m_imp);
     }
     
-    bool datatype_project_plugin::operator()(model& model, app* var, app_ref_vector& vars, expr_ref_vector& lits) {
-        return (*m_imp)(model, var, vars, lits);
+    bool datatype_project_plugin::project1(model& model, app* var, app_ref_vector& vars, expr_ref_vector& lits) {
+        return m_imp->project1(model, var, vars, lits);
     }
 
     bool datatype_project_plugin::solve(model& model, app_ref_vector& vars, expr_ref_vector& lits) {
         return m_imp->solve(model, vars, lits);
     }
 
-    vector<def> datatype_project_plugin::project(model& model, app_ref_vector& vars, expr_ref_vector& lits) {
-        return vector<def>();
+    bool datatype_project_plugin::project(model& model, app_ref_vector& vars, expr_ref_vector& lits, vector<def>& defs) {
+        return true;
     }
 
     void datatype_project_plugin::saturate(model& model, func_decl_ref_vector const& shared, expr_ref_vector& lits) {

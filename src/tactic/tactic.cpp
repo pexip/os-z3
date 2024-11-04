@@ -51,7 +51,8 @@ struct tactic_report::imp {
                    << " :time " << std::fixed << std::setprecision(2) << m_watch.get_seconds()
                    << " :before-memory " << std::fixed << std::setprecision(2) << m_start_memory
                    << " :after-memory " << std::fixed << std::setprecision(2) << end_memory
-                   << ")" << std::endl);
+                   << ")\n");
+        IF_VERBOSE(20, m_goal.display(verbose_stream() << m_id << "\n"));
         SASSERT(m_goal.is_well_formed());
     }
 };
@@ -70,9 +71,21 @@ tactic_report::~tactic_report() {
 
 void report_tactic_progress(char const * id, unsigned val) {
     if (val > 0) {
-        IF_VERBOSE(TACTIC_VERBOSITY_LVL, verbose_stream() << "(" << id << " " << val << ")" << std::endl;);
+        IF_VERBOSE(TACTIC_VERBOSITY_LVL, verbose_stream() << "(" << id << " " << val << ")\n");        
     }
 }
+
+statistics_report::~statistics_report() {
+    statistics st;
+    if (m_tactic)
+        m_tactic->collect_statistics(st);
+    else if (m_collector)
+        m_collector(st);
+    if (st.size() == 0)
+        return;
+    IF_VERBOSE(TACTIC_VERBOSITY_LVL, st.display_smt2(verbose_stream()));
+}
+
 
 void skip_tactic::operator()(goal_ref const & in, goal_ref_buffer& result) {
     result.push_back(in.get());
@@ -82,6 +95,37 @@ tactic * mk_skip_tactic() {
     return alloc(skip_tactic);
 }
 
+class lazy_tactic : public tactic {
+    ast_manager& m;
+    params_ref p;
+    std::function<tactic* (ast_manager& m, params_ref const& p)> m_mk_tactic;
+    tactic* m_tactic = nullptr;
+    void ensure_tactic() { if (!m_tactic) m_tactic = m_mk_tactic(m, p); }
+public:
+    lazy_tactic(ast_manager& m, params_ref const& p, std::function<tactic* (ast_manager&, params_ref const&)> mk_tactic) : m(m), p(p), m_mk_tactic(mk_tactic) {}
+    ~lazy_tactic() override { dealloc(m_tactic); }
+    void operator()(goal_ref const& in, goal_ref_buffer& result) override {
+        ensure_tactic();
+        (*m_tactic)(in, result);
+    }
+    void cleanup() override { if (m_tactic) m_tactic->cleanup(); }
+    char const* name() const override { return "lazy tactic"; }
+    void collect_statistics(statistics& st) const override { if (m_tactic) m_tactic->collect_statistics(st); }
+    void user_propagate_initialize_value(expr* var, expr* value) override { if (m_tactic) m_tactic->user_propagate_initialize_value(var, value); }
+    tactic* translate(ast_manager& m) override { ensure_tactic(); return m_tactic->translate(m); }
+    void reset() override { if (m_tactic) m_tactic->reset(); }
+    void reset_statistics() override { if (m_tactic) m_tactic->reset_statistics(); }
+    void register_on_clause(void* ctx, user_propagator::on_clause_eh_t& on_clause) override {
+        ensure_tactic();
+        m_tactic->register_on_clause(ctx, on_clause);
+    }
+};
+
+
+tactic* mk_lazy_tactic(ast_manager& m, params_ref const& p, std::function<tactic*(ast_manager& m, params_ref const& p)> mkt) {
+    return alloc(lazy_tactic, m, p, mkt);
+}
+
 class fail_tactic : public tactic {
 public:
     void operator()(goal_ref const & in, goal_ref_buffer & result) override {
@@ -89,6 +133,8 @@ public:
     }
 
     void cleanup() override {}
+
+    char const* name() const override { return "fail"; }
 
     tactic * translate(ast_manager & m) override { return this; }
 };
@@ -131,13 +177,12 @@ tactic * mk_trace_tactic(char const * tag) {
 
 class fail_if_undecided_tactic : public skip_tactic {
 public:
-    fail_if_undecided_tactic() {}
-
     void operator()(goal_ref const & in, goal_ref_buffer& result) override {
         if (!in->is_decided()) 
             throw tactic_exception("undecided");
         skip_tactic::operator()(in, result);
     }
+    void user_propagate_initialize_value(expr* var, expr* value) override { }
 };
 
 tactic * mk_fail_if_undecided_tactic() {
@@ -151,7 +196,7 @@ void exec(tactic & t, goal_ref const & in, goal_ref_buffer & result) {
         t.cleanup();
     }
     catch (tactic_exception & ex) {
-        IF_VERBOSE(TACTIC_VERBOSITY_LVL, verbose_stream() << "(tactic-exception \"" << escaped(ex.msg()) << "\")" << std::endl;);
+        IF_VERBOSE(TACTIC_VERBOSITY_LVL, verbose_stream() << "(tactic-exception \"" << escaped(ex.msg()) << "\")\n");
         t.cleanup();
         throw ex;
     }
@@ -181,8 +226,7 @@ lbool check_sat(tactic & t, goal_ref & g, model_ref & md, labels_vec & labels, p
     if (r.size() > 0) {
         pr = r[0]->pr(0);
         CTRACE("tactic", pr, tout << pr << "\n";);
-    }
-    
+    }    
 
     if (is_decided_sat(r)) {
         model_converter_ref mc = r[0]->mc();            
@@ -214,7 +258,9 @@ lbool check_sat(tactic & t, goal_ref & g, model_ref & md, labels_vec & labels, p
             if (mc)
                 (*mc)(labels);
         }
-        reason_unknown = "incomplete";
+        reason_unknown = get_reason_unknown(r);
+        if (reason_unknown.empty())
+            reason_unknown = "unknown";
         return l_undef;
     }
 }

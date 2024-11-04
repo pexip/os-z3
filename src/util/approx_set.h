@@ -17,7 +17,7 @@ Revision History:
 
 --*/
 #pragma once
-#include<iostream>
+#include<ostream>
 #include "util/debug.h"
 
 template<typename T> class approx_set_traits;
@@ -41,7 +41,7 @@ static_assert(sizeof(unsigned) == 4, "unsigned are 4 bytes");
 template<typename T, typename T2U_Proc, typename R=unsigned long long>
 class approx_set_tpl : private T2U_Proc {
 protected:
-    R m_set;
+    R m_set = approx_set_traits<R>::zero;
 
     unsigned e2u(T const & e) const { return T2U_Proc::operator()(e); }
 
@@ -52,22 +52,15 @@ protected:
     static approx_set_tpl r2s(R const & s) { approx_set_tpl r; r.m_set = s; return r; }
 
 public:
-    approx_set_tpl():
-        m_set(approx_set_traits<R>::zero) {
-    }
+    approx_set_tpl() = default;
 
     explicit approx_set_tpl(T const & e):
         m_set(e2s(e)) {
     }
 
-    approx_set_tpl(unsigned sz, T const * es):
-        m_set(approx_set_traits<R>::zero) {
+    approx_set_tpl(unsigned sz, T const * es) {
         for (unsigned i = 0; i < sz; i++)
             insert(es[i]);
-    }
-
-    approx_set_tpl(approx_set_tpl const & s):
-        m_set(s.m_set) {
     }
 
     void set(R s) { m_set = s; }
@@ -203,10 +196,6 @@ public:
             iterator tmp = *this; 
             ++*this; 
             return tmp; 
-        }
-
-        bool operator==(iterator const & it) const { 
-            return m_set == it.m_set;
         }
         
         bool operator!=(iterator const & it) const { 
