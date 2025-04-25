@@ -2,19 +2,9 @@
   /*++
   Copyright (c) 2017 Microsoft Corporation
 
-  Module Name:
-
-  <name>
-
-  Abstract:
-
-  <abstract>
-
   Author:
   Lev Nachmanson (levnach)
   Nikolaj Bjorner (nbjorner)
-
-  Revision History:
 
 
   --*/
@@ -30,13 +20,12 @@ struct factorization_factory;
 enum class factor_type { VAR, MON };
 
 class factor {
-    lpvar        m_var{ UINT_MAX };
-    factor_type  m_type{ factor_type::VAR };
-    bool         m_sign{ false };
+    lpvar        m_var = UINT_MAX;
+    factor_type  m_type = factor_type::VAR;
+    bool         m_sign = false;
 public:
-    factor(): factor(false) {}
-    factor(bool sign): m_sign(sign) {}
-    explicit factor(lpvar v, factor_type t) : m_var(v), m_type(t), m_sign(false) {}
+    factor() = default;
+    explicit factor(lpvar v, factor_type t) : m_var(v), m_type(t) {}
     unsigned var() const { return m_var; }
     factor_type type() const { return m_type; }
     void set(lpvar v, factor_type t) { m_var = v; m_type = t; }
@@ -99,8 +88,7 @@ struct const_iterator_mon {
     self_type operator++(int);
 
     const_iterator_mon(const bool_vector& mask, const factorization_factory *f);
-    
-    bool operator==(const self_type &other) const;
+
     bool operator!=(const self_type &other) const;
             
     factorization create_binary_factorization(factor j, factor k) const;
@@ -119,6 +107,8 @@ struct factorization_factory {
     factorization_factory(const svector<lpvar>& vars, const monic* m) :
         m_vars(vars), m_monic(m) {
     }
+
+    virtual ~factorization_factory() = default;
 
     bool_vector get_mask() const {
         // we keep the last element always in the first factor to avoid

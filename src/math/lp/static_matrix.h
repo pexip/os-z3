@@ -12,7 +12,6 @@ Author:
 #include <set>
 #include <unordered_map>
 #include <utility>
-#include "math/lp/sparse_vector.h"
 #include "math/lp/indexed_vector.h"
 #include "math/lp/permutation_matrix.h"
 #include <stack>
@@ -80,7 +79,7 @@ public:
         ref(static_matrix & m, unsigned row, unsigned col):m_matrix(m), m_row(row), m_col(col) {}
         ref & operator=(T const & v) { m_matrix.set( m_row, m_col, v); return *this; }
 
-        ref operator=(ref & v) { m_matrix.set(m_row, m_col, v.m_matrix.get(v.m_row, v.m_col)); return *this; }
+        ref operator=(ref & v) { m_matrix.set(m_row, m_col, v.m_matrix.get_elem(v.m_row, v.m_col)); return *this; }
 
         operator T () const { return m_matrix.get_elem(m_row, m_col); }
     };
@@ -106,7 +105,7 @@ public:
     void init_row_columns(unsigned m, unsigned n);
 
         // constructor with no parameters
-    static_matrix() {}
+    static_matrix() = default;
 
     // constructor
     static_matrix(unsigned m, unsigned n): m_vector_of_row_offsets(n, -1)  {
@@ -127,7 +126,6 @@ public:
 
     unsigned lowest_row_in_column(unsigned col);
 
-    void add_columns_at_the_end(unsigned delta);
     void add_new_element(unsigned i, unsigned j, const T & v);
 
     void add_row() {m_rows.push_back(row_strip<T>());}
@@ -168,8 +166,6 @@ public:
     ref operator()(unsigned row, unsigned col) { return ref(*this, row, col); }
 
     std::set<std::pair<unsigned, unsigned>>  get_domain();
-
-    void copy_column_to_indexed_vector(unsigned j, indexed_vector<T> & v) const;
 
     T get_max_abs_in_row(unsigned row) const;
     void add_column_to_vector (const T & a, unsigned j, T * v) const {
@@ -223,7 +219,7 @@ public:
     virtual void set_number_of_columns(unsigned /*n*/) { }
 #endif
 
-    T get_max_val_in_row(unsigned /* i */) const { lp_unreachable();   }
+    T get_max_val_in_row(unsigned /* i */) const { UNREACHABLE();   }
 
     T get_balance() const;
 
@@ -344,23 +340,21 @@ public:
     void fill_last_row_with_pivoting(const term& row,
                                      unsigned bj, // the index of the basis column
                                      const vector<int> & basis_heading) {
-        lp_assert(numeric_traits<T>::precise());
         lp_assert(row_count() > 0);
         m_work_vector.resize(column_count());
         T a;
          // we use the form -it + 1 = 0
         m_work_vector.set_value(one_of_type<T>(), bj);
         for (auto p : row) {
-            m_work_vector.set_value(-p.coeff(), p.column().index());
+            m_work_vector.set_value(-p.coeff(), p.j());
             // but take care of the basis 1 later
         }
     
         // now iterate with pivoting
         fill_last_row_with_pivoting_loop_block(bj, basis_heading);
         for (auto p : row) {
-            fill_last_row_with_pivoting_loop_block(p.column().index(), basis_heading);
+            fill_last_row_with_pivoting_loop_block(p.j(), basis_heading);
         }
-        lp_assert(m_work_vector.is_OK());
         unsigned last_row = row_count() - 1;
     
         for (unsigned j : m_work_vector.m_index) {

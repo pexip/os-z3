@@ -39,7 +39,7 @@ $ ldd ./run
         /lib64/ld-linux-x86-64.so.2 (0x00007fb570de9000)
 ```
 
-The bytecode version will have a depedency on z3 and other external
+The bytecode version will have a dependency on z3 and other external
 libraries (packed as dlls and usually installed in opam switch):
 ```
 $ ocamlobjinfo run | grep 'Used DLL' -A5
@@ -126,7 +126,7 @@ Using Dynlink
 -------------
 
 The built z3ml.cmxs file is a self-contained shared library that
-doesn't have any depndencies on z3 (the z3 code is included in it) and
+doesn't have any dependencies on z3 (the z3 code is included in it) and
 could be loaded with `Dynlink.loadfile` in runtime.
 
 Installation
@@ -223,7 +223,7 @@ correctly found by gcc.
 
 I specifically left the cygwin part of the code intact as I have no
 idea what the original author meant by this, neither do I use or
-tested this patch in the cygwin or mingw environemt. I think that this
+tested this patch in the cygwin or mingw environment. I think that this
 code is rather outdated and shouldn't really work. E.g., in the
 --staticlib mode adding z3linkdep (which is libz3-static.a) as an
 argument to `ocamlmklib` will yield the following broken archive

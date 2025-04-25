@@ -17,6 +17,8 @@ Revision History:
 
 
 --*/
+#pragma once
+
 #include "util/vector.h"
 #include <utility>
 #include <set>
@@ -90,7 +92,7 @@ static_matrix<T, X>::static_matrix(static_matrix const &A, unsigned * /* basis *
     init_row_columns(m, m);
     for (; m-- > 0; ) 
         for (auto & col : A.m_columns[m]) 
-            set(col.var(), m, A.get_value_of_column_cell(col));
+            set(col.var(), m, A.get_column_cell(col));
 }
 
 template <typename T, typename X> void static_matrix<T, X>::clear() {
@@ -120,11 +122,6 @@ template <typename T, typename X> unsigned static_matrix<T, X>::lowest_row_in_co
         }
     }
     return ret;
-}
-
-template <typename T, typename X> void static_matrix<T, X>::add_columns_at_the_end(unsigned delta) {
-    for (unsigned i = 0; i < delta; i++)
-        add_column();
 }
 
 template <typename T, typename X> void static_matrix<T, X>::forget_last_columns(unsigned how_many_to_forget) {
@@ -172,14 +169,6 @@ std::set<std::pair<unsigned, unsigned>>  static_matrix<T, X>::get_domain() {
     return ret;
 }
 
-template <typename T, typename X> void static_matrix<T, X>::copy_column_to_indexed_vector (unsigned j, indexed_vector<T> & v) const {
-    lp_assert(j < m_columns.size());
-    for (auto & it : m_columns[j]) {
-        const T& val = get_val(it);
-        if (!is_zero(val))
-            v.set_value(val, it.var());
-    }
-}
 
 template <typename T, typename X> T static_matrix<T, X>::get_max_abs_in_row(unsigned row) const {
     T ret = numeric_traits<T>::zero();

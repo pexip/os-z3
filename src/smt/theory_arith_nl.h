@@ -80,14 +80,12 @@ void theory_arith<Ext>::mark_dependents(theory_var v, svector<theory_var> & vars
     if (is_fixed(v))
         return;
     column & c      = m_columns[v];
-    typename svector<col_entry>::iterator it  = c.begin_entries();
-    typename svector<col_entry>::iterator end = c.end_entries();
-    for (; it != end; ++it) {
-        if (it->is_dead() || already_visited_rows.contains(it->m_row_id))
+    for (auto& ce : c) {
+        if (ce.is_dead() || already_visited_rows.contains(ce.m_row_id))
             continue;
-        TRACE("non_linear_bug", tout << "visiting row: " << it->m_row_id << "\n";);
-        already_visited_rows.insert(it->m_row_id);
-        row & r        = m_rows[it->m_row_id];
+        TRACE("non_linear_bug", tout << "visiting row: " << ce.m_row_id << "\n";);
+        already_visited_rows.insert(ce.m_row_id);
+        row & r       = m_rows[ce.m_row_id];
         theory_var s  = r.get_base_var();
         // ignore quasi base vars... actually they should not be used if the problem is non linear...
         if (is_quasi_base(s))
@@ -97,14 +95,10 @@ void theory_arith<Ext>::mark_dependents(theory_var v, svector<theory_var> & vars
         // was eliminated by substitution.
         if (s != null_theory_var && is_free(s) && s != v)
             continue;
-        typename vector<row_entry>::const_iterator it2  = r.begin_entries();
-        typename vector<row_entry>::const_iterator end2 = r.end_entries();
-        for (; it2 != end2; ++it2) {
-            if (!it2->is_dead() && !is_fixed(it2->m_var)) 
-                mark_var(it2->m_var, vars, already_found);
-            if (!it2->is_dead() && is_fixed(it2->m_var)) {                
-                TRACE("non_linear", tout << "skipped fixed\n";);
-            }            
+        for (auto& re : r) {
+            if (!re.is_dead() && !is_fixed(re.m_var))
+                mark_var(re.m_var, vars, already_found);
+            CTRACE("non_linear", !re.is_dead() && is_fixed(re.m_var), tout << "skipped fixed\n");                
         }
     }
 }
@@ -119,6 +113,7 @@ void theory_arith<Ext>::get_non_linear_cluster(svector<theory_var> & vars) {
         return;
     var_set already_found;
     row_set already_visited_rows;
+          
     for (theory_var v : m_nl_monomials) {
         expr * n     = var2expr(v);
         if (ctx.is_relevant(n))
@@ -130,9 +125,9 @@ void theory_arith<Ext>::get_non_linear_cluster(svector<theory_var> & vars) {
         TRACE("non_linear", tout << "marking dependents of: v" << v << "\n";);
         mark_dependents(v, vars, already_found, already_visited_rows);
     }
-    TRACE("non_linear", tout << "variables in non linear cluster:\n";
-          for (theory_var v : vars) tout << "v" << v << " ";
-          tout << "\n";);
+    TRACE("non_linear", tout << "variables in non linear cluster: ";
+          for (theory_var v : vars) tout << "v" << v << " "; tout << "\n";
+          for (theory_var v : m_nl_monomials) tout << "non-linear v" << v << " " << mk_pp(var2expr(v), m) << "\n";);
 }
 
 
@@ -624,11 +619,9 @@ template<typename Ext>
 bool theory_arith<Ext>::check_monomial_assignments() {
     bool computed_epsilon = false;
     for (theory_var v : m_nl_monomials) {
-        TRACE("non_linear", tout << "v" << v << " is relevant: " << ctx.is_relevant(get_enode(v)) << "\n";
-              tout << "check_monomial_assignments result: " << check_monomial_assignment(v, computed_epsilon) << "\n";
-              tout << "computed_epsilon: " << computed_epsilon << "\n";);
+        TRACE("non_linear", tout << "v" << v << " is relevant: " << ctx.is_relevant(get_enode(v)) << "\n");
         if (ctx.is_relevant(get_enode(v)) && !check_monomial_assignment(v, computed_epsilon)) {
-            TRACE("non_linear_failed", tout << "check_monomial_assignment failed for:\n" << mk_ismt2_pp(var2expr(v), get_manager()) << "\n";
+            TRACE("non_linear", tout << "check_monomial_assignment failed for:\n" << mk_ismt2_pp(var2expr(v), get_manager()) << "\n";
                   display_var(tout, v););                
             return false;
         }
@@ -772,10 +765,8 @@ typename theory_arith<Ext>::numeral theory_arith<Ext>::get_monomial_fixed_var_pr
 template<typename Ext>
 expr * theory_arith<Ext>::get_monomial_non_fixed_var(expr * m) const {
     SASSERT(is_pure_monomial(m));
-    for (unsigned i = 0; i < to_app(m)->get_num_args(); i++) {
-        expr * arg = to_app(m)->get_arg(i);
-        theory_var _var = expr2var(arg);
-        if (!is_fixed(_var))
+    for (expr* arg : *to_app(m)) {
+        if (!is_fixed(expr2var(arg)))
             return arg;
     }
     return nullptr;
@@ -787,7 +778,7 @@ expr * theory_arith<Ext>::get_monomial_non_fixed_var(expr * m) const {
 */
 template<typename Ext>
 bool theory_arith<Ext>::propagate_linear_monomial(theory_var v) {
-    TRACE("non_linear", tout << "checking whether v" << v << " became linear...\n";);
+    TRACE("non_linear_verbose", tout << "checking whether v" << v << " became linear...\n";);
     if (m_data[v].m_nl_propagated)
         return false; // already propagated this monomial.
     expr * m = var2expr(v);
@@ -826,6 +817,11 @@ bool theory_arith<Ext>::propagate_linear_monomial(theory_var v) {
             ctx.mark_as_relevant(rhs);
         }
         TRACE("non_linear_bug", tout << "enode: " << ctx.get_enode(rhs) << " enode_id: " << ctx.get_enode(rhs)->get_owner_id() << "\n";);
+        IF_VERBOSE(3,
+                   for (auto* arg : *to_app(m)) 
+                       if (is_fixed(expr2var(arg)))
+                           verbose_stream() << mk_pp(arg, get_manager()) << " = " << -k << "\n");
+            
         theory_var new_v = expr2var(rhs);
         SASSERT(new_v != null_theory_var);
         new_lower    = alloc(derived_bound, new_v, inf_numeral(0), B_LOWER);
@@ -899,6 +895,7 @@ bool theory_arith<Ext>::propagate_linear_monomial(theory_var v) {
           }
           tout << "\n";);
 
+
     return true;
 }
 
@@ -908,9 +905,11 @@ bool theory_arith<Ext>::propagate_linear_monomial(theory_var v) {
 */
 template<typename Ext>
 bool theory_arith<Ext>::propagate_linear_monomials() {
+    if (!m_params.m_nl_arith_propagate_linear_monomials)
+        return false;
     if (!reflection_enabled())
         return false;
-    TRACE("non_linear", tout << "propagating linear monomials...\n";);
+    TRACE("non_linear_verbose", tout << "propagating linear monomials...\n";);
     bool p = false;
     // CMW: m_nl_monomials can grow during this loop, so
     // don't use iterators.
@@ -1253,6 +1252,17 @@ bool theory_arith<Ext>::in_monovariate_monomials(buffer<coeff_expr> & p, expr * 
     return true;
 }
 
+
+template<typename Ext>
+bool theory_arith<Ext>::is_pure_monomial(expr* mon) const {
+    if (!m_util.is_mul(mon))
+        return false;
+    app* p = to_app(mon);
+    for (expr* arg : *p)
+        if (m_util.is_numeral(arg) || m_util.is_mul(arg))
+            return false;
+    return true;
+}
 
 /**
    \brief Display a nested form expression
@@ -1731,22 +1741,21 @@ grobner::monomial * theory_arith<Ext>::mk_gb_monomial(rational const & _coeff, e
 */
 template<typename Ext>
 void theory_arith<Ext>::add_row_to_gb(row const & r, grobner & gb) {
-    TRACE("non_linear", tout << "adding row to gb\n"; display_row(tout, r););
+    TRACE("grobner", tout << "adding row to gb\n"; display_row(tout, r););
     ptr_buffer<grobner::monomial> monomials;
     v_dependency * dep = nullptr;
     m_tmp_var_set.reset();
-    typename vector<row_entry>::const_iterator it  = r.begin_entries();
-    typename vector<row_entry>::const_iterator end = r.end_entries();
-    for (; it != end; ++it) {
-        if (!it->is_dead()) {
-            rational coeff            = it->m_coeff.to_rational();
-            expr * m                  = var2expr(it->m_var);
-            TRACE("non_linear", tout << "monomial: " << mk_pp(m, get_manager()) << "\n";);
-            grobner::monomial * new_m = mk_gb_monomial(coeff, m, gb, dep, m_tmp_var_set);
-            TRACE("non_linear", tout << "new monomial:\n"; if (new_m) gb.display_monomial(tout, *new_m); else tout << "null"; tout << "\n";);
-            if (new_m)
-                monomials.push_back(new_m);
-        }
+    for (auto& re : r) {
+        if (re.is_dead())
+            continue;
+        rational coeff            = re.m_coeff.to_rational();
+        expr * m                  = var2expr(re.m_var);
+        grobner::monomial * new_m = mk_gb_monomial(coeff, m, gb, dep, m_tmp_var_set);
+        if (new_m)
+            monomials.push_back(new_m);
+        TRACE("grobner",
+              tout << "monomial: " << mk_pp(m, get_manager()) << "\n";
+              tout << "new monomial: "; if (new_m) gb.display_monomial(tout, *new_m); else tout << "null"; tout << "\n";);        
     }
     gb.assert_eq_0(monomials.size(), monomials.data(), dep);
 }
@@ -2145,13 +2154,15 @@ void theory_arith<Ext>::set_gb_exhausted() {
 // Scan the grobner basis eqs, and look for inconsistencies.
 template<typename Ext>
 bool theory_arith<Ext>::get_gb_eqs_and_look_for_conflict(ptr_vector<grobner::equation>& eqs, grobner& gb) {
-    TRACE("grobner", );
 
     eqs.reset();
     gb.get_equations(eqs);
-    TRACE("grobner_bug", tout << "after gb\n";);
+    TRACE("grobner", tout << "after gb\n";
+          std::function<void(std::ostream& out, expr* v)> _fn = [&](std::ostream& out, expr* v) { out << "v" << expr2var(v); };
+          for (grobner::equation* eq : eqs)
+              gb.display_equation(tout, *eq, _fn);
+          );
     for (grobner::equation* eq : eqs) {
-        TRACE("grobner_bug", gb.display_equation(tout, *eq););
         if (is_inconsistent(eq, gb) || is_inconsistent2(eq, gb)) {
             TRACE("grobner", tout << "inconsistent: "; gb.display_equation(tout, *eq););
             return true;
@@ -2249,7 +2260,9 @@ typename theory_arith<Ext>::gb_result theory_arith<Ext>::compute_grobner(svector
     ptr_vector<grobner::equation> eqs;    
 
     do {
-        TRACE("non_linear_gb", tout << "before:\n"; gb.display(tout););
+        TRACE("grobner", tout << "before grobner:\n";
+              std::function<void(std::ostream& out, expr* v)> _fn = [&](std::ostream& out, expr* v) { out << "v" << expr2var(v); };
+              gb.display(tout, _fn));
         compute_basis(gb, warn);
         update_statistics(gb);
         TRACE("non_linear_gb", tout << "after:\n"; gb.display(tout););
@@ -2257,8 +2270,10 @@ typename theory_arith<Ext>::gb_result theory_arith<Ext>::compute_grobner(svector
             return GB_FAIL;
         if (get_gb_eqs_and_look_for_conflict(eqs, gb))
             return GB_PROGRESS;
+        if (scan_for_linear(eqs, gb))
+            return GB_NEW_EQ;
     }
-    while(scan_for_linear(eqs, gb) && m_params.m_nl_arith_gb_perturbate && 
+    while(m_params.m_nl_arith_gb_perturbate && 
           (!m_nl_gb_exhausted) && try_to_modify_eqs(eqs, gb, next_weight));
     return GB_FAIL;
 }
@@ -2268,6 +2283,8 @@ typename theory_arith<Ext>::gb_result theory_arith<Ext>::compute_grobner(svector
 */
 template<typename Ext>
 bool theory_arith<Ext>::max_min_nl_vars() {
+    if (!m_params.m_nl_arith_optimize_bounds)
+        return true;
     var_set             already_found;
     svector<theory_var> vars;
     for (theory_var v : m_nl_monomials) {
@@ -2350,7 +2367,7 @@ final_check_status theory_arith<Ext>::process_non_linear() {
             }
             break;
         case 1:
-            if (!is_cross_nested_consistent(vars))
+            if (m_params.m_nl_arith_cross_nested && !is_cross_nested_consistent(vars))
                 progress = true;
             break;
         case 2:

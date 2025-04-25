@@ -41,10 +41,7 @@ mpf::mpf(unsigned _ebits, unsigned _sbits):
     set(ebits, sbits);
 }
 
-mpf::~mpf() {
-}
-
-void mpf::swap(mpf & other) {
+void mpf::swap(mpf & other) noexcept {
     unsigned tmp = ebits;
     ebits = other.ebits;
     other.ebits = tmp;
@@ -62,9 +59,6 @@ void mpf::swap(mpf & other) {
 mpf_manager::mpf_manager() :
     m_mpz_manager(m_mpq_manager),
     m_powers2(m_mpz_manager) {
-}
-
-mpf_manager::~mpf_manager() {
 }
 
 void mpf_manager::set(mpf & o, unsigned ebits, unsigned sbits, int value) {
@@ -200,22 +194,20 @@ void mpf_manager::set(mpf & o, unsigned ebits, unsigned sbits, mpf_rounding_mode
 
     // We expect [i].[f]P[e], where P means that the exponent is interpreted as 2^e instead of 10^e.
 
-    std::string v(value);
-
-    std::string f, e;
+    std::string_view  v(value);
     bool sgn = false;
 
-    if (v.substr(0, 1) == "-") {
+    if (v[0] == '-') {
         sgn = true;
         v = v.substr(1);
     }
-    else if (v.substr(0, 1) == "+")
+    else if (v[0] == '+')
         v = v.substr(1);
 
     size_t e_pos = v.find('p');
-    if (e_pos == std::string::npos) e_pos = v.find('P');
-    f = (e_pos != std::string::npos) ? v.substr(0, e_pos) : v;
-    e = (e_pos != std::string::npos) ? v.substr(e_pos+1) : "0";
+    if (e_pos == std::string_view::npos) e_pos = v.find('P');
+    auto f = (e_pos != std::string_view::npos) ? std::string(v.substr(0, e_pos)) : std::string(v);
+    auto e = (e_pos != std::string_view::npos) ? std::string(v.substr(e_pos+1)) : "0";
 
     TRACE("mpf_dbg", tout << "sgn = " << sgn << " f = " << f << " e = " << e << std::endl;);
 
@@ -904,8 +896,6 @@ void mpf_manager::fma(mpf_rounding_mode rm, mpf const & x, mpf const & y, mpf co
         SASSERT(m_mpz_manager.lt(res.significand(), m_powers2(2 * x.sbits + 1 + 3)));
         if (m_mpz_manager.ge(res.significand(), m_powers2(2 * x.sbits + 3)))
         {
-            SASSERT(exp(res) < mk_max_exp(x.ebits)); // NYI.
-
             res.get().exponent++;
             renorm_sticky = !m_mpz_manager.is_even(res.significand());
             m_mpz_manager.machine_div2k(res.significand(), 1);
@@ -931,13 +921,22 @@ void mpf_manager::fma(mpf_rounding_mode rm, mpf const & x, mpf const & y, mpf co
         }
         else {
             m_mpz_manager.mul2k(res.significand(), 4 - x.sbits + 3, o.significand);
+            o.exponent -= 4 - x.sbits + 3;
         }
 
         if (renorm_sticky && m_mpz_manager.is_even(o.significand))
             m_mpz_manager.inc(o.significand);
 
         TRACE("mpf_dbg", tout << "sum[-1:sbits+2] = " << m_mpz_manager.to_string(o.significand) << std::endl;
-                         tout << "R = " << to_string_binary(o, 1, 3) << std::endl;);
+                        tout << "R = " << to_string_binary(o, 1, 3) << std::endl;);
+
+        unsigned max_size = o.sbits+4;
+        unsigned sig_size = m_mpz_manager.bitsize(o.significand);
+        if (sig_size > max_size) {
+            unsigned d = sig_size - max_size;
+            m_mpz_manager.machine_div2k(o.significand, d);
+            o.exponent += d;
+        }
 
         if (m_mpz_manager.is_zero(o.significand))
             mk_zero(x.ebits, x.sbits, rm == MPF_ROUND_TOWARD_NEGATIVE, o);
@@ -945,6 +944,7 @@ void mpf_manager::fma(mpf_rounding_mode rm, mpf const & x, mpf const & y, mpf co
             round(rm, o);
     }
 
+    TRACE("mpf_dbg", tout << "FMA = " << to_string(o) << std::endl;);
 }
 
 void my_mpz_sqrt(unsynch_mpz_manager & m, unsigned sbits, bool odd_exp, mpz & in, mpz & o) {
@@ -1560,7 +1560,7 @@ std::string mpf_manager::to_string(mpf const & x) {
             if (m_mpq_manager.is_int(r))
                 ss << ".0";
             ss << " " << exponent;
-            res += ss.str();
+            res += std::move(ss).str();
         }
     }
 
@@ -1598,7 +1598,7 @@ std::string mpf_manager::to_string_raw(mpf const & x) {
     res += " ";
     std::stringstream ss("");
     ss << exp(x);
-    res += ss.str();
+    res += std::move(ss).str();
     if (is_normal(x))
         res += " N";
     else
@@ -1626,12 +1626,8 @@ std::string mpf_manager::to_string_hexfloat(mpf const & x) {
                                     std::ios_base::showpoint | std::ios_base::showpos);
     ss.setf(ff);
     ss.precision(13);
-#if defined(_WIN32) && _MSC_VER >= 1800
     ss << std::hexfloat << to_double(x);
-#else
-    ss << std::hex << (*reinterpret_cast<const unsigned long long *>(&(x)));
-#endif
-    return ss.str();
+    return std::move(ss).str();
 }
 
 std::string mpf_manager::to_string_binary(mpf const & x, unsigned upper_extra, unsigned lower_extra) {

@@ -39,13 +39,13 @@ namespace q {
     class mam {
         friend class mam_impl;
 
-        mam() {}
+        mam() = default;
 
     public:
 
         static mam * mk(euf::solver& ctx, ematch& em);
         
-        virtual ~mam() {}
+        virtual ~mam() = default;
         
         virtual void add_pattern(quantifier * q, app * mp) = 0;
 

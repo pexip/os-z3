@@ -28,22 +28,24 @@
 namespace nla {
 
 class eq_justification {
-    lpci m_cs[4];
+    u_dependency* m_cs[4];
 public:
-    eq_justification(std::initializer_list<lpci> cs) {
+    eq_justification(std::initializer_list<u_dependency*> cs) {
         int i = 0;
-        for (lpci c: cs) {
+        for (auto c: cs) {
             m_cs[i++] = c;
         }
         for (; i < 4; i++) {
-            m_cs[i] = -1;
+            m_cs[i] = nullptr;
         }
     }
 
-    void explain(lp::explanation& e) const {
-        for (lpci c : m_cs)
-            if (c + 1 != 0) // c != -1
-                e.push_back(c);
+    u_dependency* const* begin() const { return m_cs; }
+    u_dependency* const* end() const {
+        unsigned i = 0;
+        for (; i < 4 && m_cs[i]; ++i)
+            ;
+        return m_cs + i;
     }
 };
 
@@ -68,8 +70,7 @@ class var_eqs {
 
     T*                                m_merge_handler;    
     union_find<var_eqs>               m_uf;
-    lp::incremental_vector<std::pair<signed_var, signed_var>>    
-	                                  m_trail;
+    lp::incremental_vector<std::pair<signed_var, signed_var>> m_trail;
     vector<svector<eq_edge>>          m_eqs;    // signed_var.index() -> the edges adjacent to signed_var.index()
 
     trail_stack                       m_stack;
@@ -80,7 +81,7 @@ class var_eqs {
         
     mutable stats m_stats;
 public:    
-    var_eqs(): m_merge_handler(nullptr), m_uf(*this), m_stack() {}    
+    var_eqs(): m_merge_handler(nullptr), m_uf(*this) {}    
     /**
        \brief push a scope    */
     void push() {
@@ -203,7 +204,7 @@ public:
         }
         
         for (eq_justification const& j : m_justtrail) {
-            j.explain(e);
+            explain_eq(j, e);
         }
         m_stats.m_num_explains += m_justtrail.size();
         m_stats.m_num_explain_calls++;
@@ -215,6 +216,17 @@ public:
         m_marked_trail.reset();
 
         // IF_VERBOSE(2, verbose_stream() << (double)m_stats.m_num_explains / m_stats.m_num_explain_calls << "\n");
+    }
+
+    void explain_eq(eq_justification const& eq, lp::explanation& e) const {
+        u_dependency_manager dm;
+        unsigned_vector deps;
+        for (auto* dep : eq) {
+            deps.reset();
+            dm.linearize(dep, deps);
+            for (auto ci : deps)
+                e.push_back(ci);
+        }
     }
 
     void explain_bfs(signed_var v1, signed_var v2, lp::explanation& e) const {
@@ -250,7 +262,7 @@ public:
         }
         
         while (head != 0) {
-            m_justtrail[head].explain(e);
+            explain_eq(m_justtrail[head], e);
             head = m_todo[head].m_index;
             ++m_stats.m_num_explains;
         }
@@ -290,7 +302,6 @@ public:
             return signed_var(m_idx);
         }
         iterator& operator++() { m_idx = m_ve.m_uf.next(m_idx); m_touched = true; return *this; }
-        bool operator==(iterator const& other) const { return m_idx == other.m_idx && m_touched == other.m_touched; }
         bool operator!=(iterator const& other) const { return m_idx != other.m_idx || m_touched != other.m_touched; }
     };
 

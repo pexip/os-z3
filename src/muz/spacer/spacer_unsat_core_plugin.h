@@ -31,9 +31,9 @@ namespace spacer {
         ast_manager& m;
     public:
         unsat_core_plugin(unsat_core_learner& learner);
-        virtual ~unsat_core_plugin() {};
+        virtual ~unsat_core_plugin() = default;
         virtual void compute_partial_core(proof* step) = 0;
-        virtual void finalize(){};
+        virtual void finalize(){}
 
         unsat_core_learner& m_ctx;
     };

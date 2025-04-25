@@ -321,6 +321,13 @@ namespace smt {
         virtual bool is_shared(theory_var v) const {
             return false;
         }
+
+        /**
+           \brief Determine if node \c n under parent \c p is in a beta redex position.
+        */
+        virtual bool is_beta_redex(enode* p, enode* n) const {
+            return false;
+        }
     
         /**
            \brief Return true if the theory has something to propagate
@@ -361,7 +368,8 @@ namespace smt {
         //
         // ----------------------------------------------------
 
-        virtual void validate_model(model& mdl) {}
+        virtual void validate_model(proto_model& mdl) {}
+
 
         // ----------------------------------------------------
         //
@@ -380,7 +388,7 @@ namespace smt {
 
     public:
         theory(context& ctx, family_id fid);
-        virtual ~theory();
+        virtual ~theory() = default;
         
         virtual void setup() {}
 
@@ -453,9 +461,6 @@ namespace smt {
         
         std::ostream& display_flat_app(std::ostream & out, app * n) const;
         
-        std::ostream& display_var_def(std::ostream & out, theory_var v) const { return display_app(out, get_enode(v)->get_expr()); }
-        
-        std::ostream& display_var_flat_def(std::ostream & out, theory_var v) const { return display_flat_app(out, get_enode(v)->get_expr());  }
 
     protected:
         void log_axiom_instantiation(app * r, unsigned axiom_id = UINT_MAX, unsigned num_bindings = 0, 
@@ -481,6 +486,7 @@ namespace smt {
         }
 
         void log_axiom_unit(app* r) {
+            expr_ref _r(r, m);
             log_axiom_instantiation(r);
             m.trace_stream() << "[end-of-instance]\n";
         }
@@ -541,6 +547,10 @@ namespace smt {
             if (m.are_equal(lhs, rhs))
                 return m.mk_true();
             return get_manager().mk_eq(lhs, rhs);
+        }
+
+        virtual void initialize_value(expr* var, expr* value) {
+            IF_VERBOSE(5, verbose_stream() << "no default initialization associated with " << mk_pp(var, m) << " := " << mk_pp(value, m) << "\n");
         }
 
         literal mk_eq(expr * a, expr * b, bool gate_ctx);
@@ -617,6 +627,12 @@ namespace smt {
         bool is_relevant_and_shared(enode * n) const;
 
         bool assume_eq(enode * n1, enode * n2);
+
+
+        /**
+         * \brief theory plugin for fixed values.
+         */
+        virtual bool is_fixed_propagated(theory_var v, expr_ref& val, literal_vector & explain) { return false; }
     };
     
 };

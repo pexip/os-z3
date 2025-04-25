@@ -47,7 +47,7 @@ extern "C" {
         env_params::updt_params();
     }
     
-    Z3_bool_opt Z3_API Z3_global_param_get(Z3_string param_id, Z3_string_ptr param_value) {
+    bool Z3_API Z3_global_param_get(Z3_string param_id, Z3_string_ptr param_value) {
         memory::initialize(UINT_MAX);
         LOG_Z3_global_param_get(param_id, param_value);
         *param_value = nullptr;
@@ -62,6 +62,17 @@ extern "C" {
             warning_msg("%s", ex.msg());
             return false;
         }
+    }
+
+    Z3_param_descrs Z3_API Z3_get_global_param_descrs(Z3_context c) {
+        Z3_TRY;
+        LOG_Z3_get_global_param_descrs(c);
+        Z3_param_descrs_ref * d = alloc(Z3_param_descrs_ref, *mk_c(c));
+        mk_c(c)->save_object(d);
+        d->m_descrs = gparams::get_global_param_descrs();
+        auto r = of_param_descrs(d);
+        RETURN_Z3(r);
+        Z3_CATCH_RETURN(nullptr);
     }
 
     Z3_config Z3_API Z3_mk_config(void) {
@@ -87,7 +98,10 @@ extern "C" {
         LOG_Z3_set_param_value(c, param_id, param_value);
         try {
             ast_context_params * p = reinterpret_cast<ast_context_params*>(c);
-            p->set(param_id, param_value);
+            if (p->is_shell_only_parameter(param_id)) 
+                warning_msg("parameter %s can only be set for the shell, not binary API", param_id);
+            else
+                p->set(param_id, param_value);
         }
         catch (z3_exception & ex) {
             // The error handler is only available for contexts
@@ -100,7 +114,10 @@ extern "C" {
         Z3_TRY;
         LOG_Z3_update_param_value(c, param_id, param_value);
         RESET_ERROR_CODE();
-        mk_c(c)->params().set(param_id, param_value);
+        if (mk_c(c)->params().is_shell_only_parameter(param_id))
+            warning_msg("parameter %s can only be set for the shell, not binary API", param_id);
+        else
+            mk_c(c)->params().set(param_id, param_value);
         Z3_CATCH;
     }
 

@@ -7,18 +7,17 @@ import multiprocessing
 import re
 import glob
 from setuptools import setup
-from distutils.util import get_platform
-from distutils.errors import LibError
-from distutils.command.build import build as _build
-from distutils.command.sdist import sdist as _sdist
-from distutils.command.clean import clean as _clean
+from setuptools.command.build import build as _build
+from setuptools.command.sdist import sdist as _sdist
+from setuptools.command.bdist_wheel import bdist_wheel as _bdist_wheel
 from setuptools.command.develop import develop as _develop
-from setuptools.command.bdist_egg import bdist_egg as _bdist_egg
 
+class LibError(Exception):
+    pass
 
 build_env = dict(os.environ)
 build_env['PYTHON'] = sys.executable
-build_env['CXXFLAGS'] = build_env.get('CXXFLAGS', '') + " -std=c++11"
+build_env['CXXFLAGS'] = build_env.get('CXXFLAGS', '') + " -std=c++20"
 
 # determine where we're building and where sources are
 ROOT_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -33,6 +32,8 @@ if RELEASE_DIR is None:
     HEADER_DIRS = [os.path.join(SRC_DIR, 'src', 'api'), os.path.join(SRC_DIR, 'src', 'api', 'c++')]
     RELEASE_METADATA = None
     BUILD_PLATFORM = sys.platform
+    BUILD_ARCH = os.environ.get("Z3_CROSS_COMPILING", platform.machine())
+    BUILD_OS_VERSION = platform.mac_ver()[0].split(".")
 else:
     if not os.path.isdir(RELEASE_DIR):
         raise Exception("RELEASE_DIR (%s) is not a directory!" % RELEASE_DIR)
@@ -43,6 +44,11 @@ else:
         raise Exception("RELEASE_DIR (%s) must be in the format z3-version-arch-os[-osversion] so we can extract metadata from it. Sorry!" % RELEASE_DIR)
     RELEASE_METADATA.pop(0)
     BUILD_PLATFORM = RELEASE_METADATA[2]
+    BUILD_ARCH = RELEASE_METADATA[1]
+    if len(RELEASE_METADATA) == 4:
+        BUILD_OS_VERSION = RELEASE_METADATA[3].split(".")
+    else:
+        BUILD_OS_VERSION = None
 
 # determine where destinations are
 LIBS_DIR = os.path.join(ROOT_DIR, 'z3', 'lib')
@@ -50,7 +56,7 @@ HEADERS_DIR = os.path.join(ROOT_DIR, 'z3', 'include')
 BINS_DIR = os.path.join(ROOT_DIR, 'bin')
 
 # determine platform-specific filenames
-if BUILD_PLATFORM in ('darwin', 'osx'):
+if BUILD_PLATFORM in ('sequoia','darwin', 'osx'):
     LIBRARY_FILE = "libz3.dylib"
     EXECUTABLE_FILE = "z3"
 elif BUILD_PLATFORM in ('win32', 'cygwin', 'win'):
@@ -129,6 +135,15 @@ def _configure_z3():
     for key, val in cmake_options.items():
         if type(val) is bool:
             cmake_options[key] = str(val).upper()
+
+    # Allow command-line arguments to add and override Z3_ options
+    for i in range(len(sys.argv) - 1):
+        key = sys.argv[i]
+        if key.startswith("Z3_"):
+            val = sys.argv[i + 1].upper()
+            if val == "TRUE" or val == "FALSE":
+                cmake_options[key] = val
+                
     cmake_args = [ '-D' + key + '=' + value for key,value in cmake_options.items() ]
     args = [ 'cmake', *cmake_args, SRC_DIR ]
     if subprocess.call(args, env=build_env, cwd=BUILD_DIR) != 0:
@@ -154,16 +169,10 @@ def _copy_bins():
 
     _clean_bins()
 
-    python_dir = None
-    if RELEASE_DIR is not None:
-        python_dir = os.path.join(RELEASE_DIR, 'bin', 'python')
-    elif SRC_DIR == SRC_DIR_LOCAL:
-        python_dir = os.path.join(SRC_DIR, 'src', 'api', 'python')
-    if python_dir is not None:
-        py_z3_build_dir = os.path.join(BUILD_DIR, 'python', 'z3')
-        root_z3_dir = os.path.join(ROOT_DIR, 'z3')
-        shutil.copy(os.path.join(py_z3_build_dir, 'z3core.py'), root_z3_dir)
-        shutil.copy(os.path.join(py_z3_build_dir, 'z3consts.py'), root_z3_dir)
+    py_z3_build_dir = os.path.join(BUILD_DIR, 'python', 'z3')
+    root_z3_dir = os.path.join(ROOT_DIR, 'z3')
+    shutil.copy(os.path.join(py_z3_build_dir, 'z3core.py'), root_z3_dir)
+    shutil.copy(os.path.join(py_z3_build_dir, 'z3consts.py'), root_z3_dir)
 
     # STEP 2: Copy the shared library, the executable and the headers
 
@@ -183,6 +192,20 @@ def _copy_bins():
             if not fname.endswith('.h'):
                 continue
             shutil.copy(os.path.join(header_dir, fname), os.path.join(HEADERS_DIR, fname))
+
+    # This hack lets z3 installed libs link on M1 macs; it is a hack, not a proper fix
+    # @TODO: Linked issue: https://github.com/Z3Prover/z3/issues/5926
+    major_minor = '.'.join(_z3_version().split('.')[:2])
+    link_name = None
+    if BUILD_PLATFORM in ('win32', 'cygwin', 'win'):
+        pass # TODO: When windows VMs work on M1, fill this in
+    elif BUILD_PLATFORM in ('sequoia', 'darwin', 'osx'):
+        split = LIBRARY_FILE.split('.')
+        link_name = split[0] + '.' + major_minor + '.' + split[1]
+    else:
+        link_name = LIBRARY_FILE + '.' + major_minor
+    if link_name:
+        os.symlink(LIBRARY_FILE, os.path.join(LIBS_DIR, link_name), True)
 
 def _copy_sources():
     """
@@ -221,93 +244,68 @@ class develop(_develop):
         self.execute(_copy_bins, (), msg="Copying binaries")
         _develop.run(self)
 
-class bdist_egg(_bdist_egg):
-    def run(self):
-        self.run_command('build')
-        _bdist_egg.run(self)
-
 class sdist(_sdist):
     def run(self):
         self.execute(_clean_bins, (), msg="Cleaning binary files and headers")
         self.execute(_copy_sources, (), msg="Copying source files")
         _sdist.run(self)
 
-class clean(_clean):
-    def run(self):
-        self.execute(_clean_bins, (), msg="Cleaning binary files and headers")
-        self.execute(_clean_native_build, (), msg="Cleaning native build")
-        _clean.run(self)
+# The Azure Dev Ops pipelines use internal OS version tagging that don't correspond
+# to releases.
 
-# the build directory needs to exist
-#try: os.makedirs(os.path.join(ROOT_DIR, 'build'))
-#except OSError: pass
+internal_build_re = re.compile("(.+)\_7")
 
-if 'bdist_wheel' in sys.argv and '--plat-name' not in sys.argv:
-    if RELEASE_DIR is None:
-        name = get_platform()
-        if 'linux' in name:
-            # linux_* platform tags are disallowed because the python ecosystem is fubar
-            # linux builds should be built in the centos 5 vm for maximum compatibility
-            # see https://github.com/pypa/manylinux
-            # see also https://github.com/angr/angr-dev/blob/master/admin/bdist.py
-            plat_name = 'manylinux1_' + platform.machine()
-        elif 'mingw' in name:
-            if platform.architecture()[0] == '64bit':
-                plat_name = 'win_amd64'
-            else:
-                plat_name ='win32'
-        else:
-            # https://www.python.org/dev/peps/pep-0425/
-            plat_name = name.replace('.', '_').replace('-', '_')
-    else:
-        # extract the architecture of the release from the directory name
-        arch = RELEASE_METADATA[1]
-        distos = RELEASE_METADATA[2]
-        if distos in ('debian', 'ubuntu') or 'linux' in distos:
-            raise Exception("Linux binary distributions must be built on centos to conform to PEP 513")
-        elif distos == 'glibc':
-            if arch == 'x64':
-                plat_name = 'manylinux1_x86_64'
-            else:
-                plat_name = 'manylinux1_i686'
-        elif distos == 'win':
-            if arch == 'x64':
-                plat_name = 'win_amd64'
-            else:
-                plat_name = 'win32'
-        elif distos == 'osx':
-            osver = RELEASE_METADATA[3]
-            if osver.count('.') > 1:
-                osver = '.'.join(osver.split('.')[:2])
-            if arch == 'x64':
-                plat_name ='macosx_%s_x86_64' % osver.replace('.', '_')
-            else:
-                raise Exception(f"idk how os {distos} {osver} works. what goes here?")
-        else:
-            raise Exception(f"idk how to translate between this z3 release os {distos} and the python naming scheme")
+class bdist_wheel(_bdist_wheel):
 
-    idx = sys.argv.index('bdist_wheel') + 1
-    sys.argv.insert(idx, '--plat-name')
-    sys.argv.insert(idx + 1, plat_name)
-    sys.argv.insert(idx + 2, '--universal')   # supports py2+py3. if --plat-name is not specified this will also mean that the package can be installed on any machine regardless of architecture, so watch out!
+    def remove_build_machine_os_version(self, platform, os_version_tag):
+        if platform in ["osx", "darwin", "sequoia"]:
+            m = internal_build_re.search(os_version_tag)
+            if m:
+                return m.group(1) + "_0"
+        return os_version_tag
+            
+            
+    def finalize_options(self):
+        if BUILD_ARCH is not None and BUILD_PLATFORM is not None:
+            os_version_tag = '_'.join(BUILD_OS_VERSION[:2]) if BUILD_OS_VERSION is not None else 'xxxxxx'
+            os_version_tag = self.remove_build_machine_os_version(BUILD_PLATFORM, os_version_tag)
+            TAGS = {
+                # linux tags cannot be deployed - they must be auditwheel'd to pick the right compatibility tag based on imported libc symbol versions
+                ("linux", "x86_64"): "linux_x86_64",
+                ("linux", "aarch64"): "linux_aarch64",
+                # windows arm64 is not supported by pypi yet
+                ("win", "x64"): "win_amd64",
+                ("win", "x86"): "win32",
+                ("osx", "x64"): f"macosx_{os_version_tag}_x86_64",
+                ("osx", "arm64"): f"macosx_{os_version_tag}_arm64",
+                ("darwin", "x86_64"): f"macosx_{os_version_tag}_x86_64",
+                ("darwin", "x64"): f"macosx_{os_version_tag}_x86_64",
+                ("darwin", "arm64"): f"macosx_{os_version_tag}_arm64",
+                ("sequoia", "x64"): f"macosx_{os_version_tag}_x86_64",
+                ("sequoia", "x86_64"): f"macosx_{os_version_tag}_x86_64",
+                ("sequoia", "arm64"): f"macosx_{os_version_tag}_arm64",
+            }  # type: dict[tuple[str, str], str]
+            self.plat_name = TAGS[(BUILD_PLATFORM, BUILD_ARCH)]
+        return super().finalize_options()
 
 
 setup(
     name='z3-solver',
     version=_z3_version(),
     description='an efficient SMT solver library',
-    long_description='Z3 is a theorem prover from Microsoft Research with support for bitvectors, booleans, arrays, floating point numbers, strings, and other data types.\n\nFor documentation, please read http://z3prover.github.io/api/html/z3.html\n\nIn the event of technical difficulties related to configuration, compilation, or installation, please submit issues to https://github.com/angr/angr-z3',
+    long_description='Z3 is a theorem prover from Microsoft Research with support for bitvectors, booleans, arrays, floating point numbers, strings, and other data types.\n\nFor documentation, please read http://z3prover.github.io/api/html/z3.html',
     author="The Z3 Theorem Prover Project",
-    maintainer="Audrey Dutcher",
+    maintainer="Audrey Dutcher and Nikolaj Bjorner",
     maintainer_email="audrey@rhelmot.io",
     url='https://github.com/Z3Prover/z3',
     license='MIT License',
     keywords=['z3', 'smt', 'sat', 'prover', 'theorem'],
     packages=['z3'],
+    install_requires = ["importlib-resources; python_version < '3.9'"],
     include_package_data=True,
     package_data={
         'z3': [os.path.join('lib', '*'), os.path.join('include', '*.h'), os.path.join('include', 'c++', '*.h')]
     },
     data_files=[('bin',[os.path.join('bin',EXECUTABLE_FILE)])],
-    cmdclass={'build': build, 'develop': develop, 'sdist': sdist, 'bdist_egg': bdist_egg, 'clean': clean},
+    cmdclass={'build': build, 'develop': develop, 'sdist': sdist, 'bdist_wheel': bdist_wheel},
 )

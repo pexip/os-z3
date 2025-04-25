@@ -16,9 +16,11 @@ set(Z3_JAVA_PACKAGE_NAME "com.microsoft.z3")
 set(Z3_JAVA_NATIVE_JAVA "${CMAKE_CURRENT_BINARY_DIR}/Native.java")
 set(Z3_JAVA_NATIVE_CPP "${CMAKE_CURRENT_BINARY_DIR}/Native.cpp")
 add_custom_command(OUTPUT "${Z3_JAVA_NATIVE_JAVA}" "${Z3_JAVA_NATIVE_CPP}"
-  COMMAND "${PYTHON_EXECUTABLE}"
+  COMMAND "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/scripts/update_api.py"
     ${Z3_FULL_PATH_API_HEADER_FILES_TO_SCAN}
+    "--java-input-dir"
+    "${CMAKE_CURRENT_SOURCE_DIR}"
     "--java-output-dir"
     "${CMAKE_CURRENT_BINARY_DIR}"
     "--java-package-name"
@@ -27,10 +29,8 @@ add_custom_command(OUTPUT "${Z3_JAVA_NATIVE_JAVA}" "${Z3_JAVA_NATIVE_CPP}"
     ${Z3_FULL_PATH_API_HEADER_FILES_TO_SCAN}
     "${PROJECT_SOURCE_DIR}/scripts/update_api.py"
     ${Z3_GENERATED_FILE_EXTRA_DEPENDENCIES}
-    # FIXME: When update_api.py no longer uses ``mk_util`` drop this dependency
-    "${PROJECT_SOURCE_DIR}/scripts/mk_util.py"
   COMMENT "Generating \"${Z3_JAVA_NATIVE_JAVA}\" and \"${Z3_JAVA_NATIVE_CPP}\""
-  ${ADD_CUSTOM_COMMAND_USES_TERMINAL_ARG}
+  USES_TERMINAL
 )
 
 # Add rule to build native code that provides a bridge between
@@ -74,7 +74,7 @@ foreach (enum_file ${Z3_JAVA_ENUMERATION_PACKAGE_FILES})
   )
 endforeach()
 add_custom_command(OUTPUT ${Z3_JAVA_ENUMERATION_PACKAGE_FILES_FULL_PATH}
-  COMMAND "${PYTHON_EXECUTABLE}"
+  COMMAND "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/scripts/mk_consts_files.py"
     ${Z3_FULL_PATH_API_HEADER_FILES_TO_SCAN}
     "--java-output-dir"
@@ -86,31 +86,26 @@ add_custom_command(OUTPUT ${Z3_JAVA_ENUMERATION_PACKAGE_FILES_FULL_PATH}
     "${PROJECT_SOURCE_DIR}/scripts/mk_consts_files.py"
     ${Z3_GENERATED_FILE_EXTRA_DEPENDENCIES}
   COMMENT "Generating ${Z3_JAVA_PACKAGE_NAME}.enumerations package"
-  ${ADD_CUSTOM_COMMAND_USES_TERMINAL_ARG}
+  USES_TERMINAL
 )
 
 set(Z3_JAVA_JAR_SOURCE_FILES
   AlgebraicNum.java
-  ApplyResultDecRefQueue.java
   ApplyResult.java
   ArithExpr.java
   ArithSort.java
   ArrayExpr.java
   ArraySort.java
-  ASTDecRefQueue.java
   AST.java
-  AstMapDecRefQueue.java
   ASTMap.java
-  AstVectorDecRefQueue.java
   ASTVector.java
   BitVecExpr.java
   BitVecNum.java
   BitVecSort.java
   BoolExpr.java
   BoolSort.java
-  ConstructorDecRefQueue.java
+  CharSort.java
   Constructor.java
-  ConstructorListDecRefQueue.java
   ConstructorList.java
   Context.java
   DatatypeExpr.java
@@ -120,7 +115,6 @@ set(Z3_JAVA_JAR_SOURCE_FILES
   FiniteDomainExpr.java
   FiniteDomainNum.java
   FiniteDomainSort.java
-  FixedpointDecRefQueue.java
   Fixedpoint.java
   FPExpr.java
   FPNum.java
@@ -129,13 +123,9 @@ set(Z3_JAVA_JAR_SOURCE_FILES
   FPRMSort.java
   FPSort.java
   FuncDecl.java
-  FuncInterpDecRefQueue.java
-  FuncInterpEntryDecRefQueue.java
   FuncInterp.java
   Global.java
-  GoalDecRefQueue.java
   Goal.java
-  IDecRefQueue.java
   IntExpr.java
   IntNum.java
   IntSort.java
@@ -143,16 +133,11 @@ set(Z3_JAVA_JAR_SOURCE_FILES
   Lambda.java
   ListSort.java
   Log.java
-  ModelDecRefQueue.java
   Model.java
-  OptimizeDecRefQueue.java
   Optimize.java
-  ParamDescrsDecRefQueue.java
   ParamDescrs.java
-  ParamsDecRefQueue.java
   Params.java
   Pattern.java
-  ProbeDecRefQueue.java
   Probe.java
   Quantifier.java
   RatNum.java
@@ -164,21 +149,21 @@ set(Z3_JAVA_JAR_SOURCE_FILES
   SeqExpr.java
   SeqSort.java
   SetSort.java
-  SolverDecRefQueue.java
+  Simplifier.java
   Solver.java
   Sort.java
-  StatisticsDecRefQueue.java
   Statistics.java
   Status.java
   StringSymbol.java
   Symbol.java
-  TacticDecRefQueue.java
   Tactic.java
   TupleSort.java
   UninterpretedSort.java
+  UserPropagatorBase.java
   Version.java
   Z3Exception.java
   Z3Object.java
+  Z3ReferenceQueue.java
 )
 set(Z3_JAVA_JAR_SOURCE_FILES_FULL_PATH "")
 foreach (java_src_file ${Z3_JAVA_JAR_SOURCE_FILES})
@@ -200,11 +185,13 @@ add_custom_target(build_z3_java_bindings
 
 # Rule to build ``com.microsoft.z3.jar``
 # TODO: Should we set ``CMAKE_JNI_TARGET`` to ``TRUE``?
+# REMARK: removed VERSION to fix issue with using this to create installations.
+
 add_jar(z3JavaJar
   SOURCES ${Z3_JAVA_JAR_SOURCE_FILES_FULL_PATH}
   OUTPUT_NAME ${Z3_JAVA_PACKAGE_NAME}
   OUTPUT_DIR "${PROJECT_BINARY_DIR}"
-  VERSION "${Z3_VERSION}"
+# VERSION "${Z3_VERSION}"
 )
 
 ###############################################################################
@@ -215,21 +202,22 @@ if (Z3_INSTALL_JAVA_BINDINGS)
   # Provide cache variables for the install locations that the user can change.
   # This defaults to ``/usr/local/java`` which seems to be the location for ``.jar``
   # files on Linux distributions
-  set(Z3_JAVA_JAR_INSTALLDIR
-    "${CMAKE_INSTALL_DATAROOTDIR}/java"
-    CACHE
-    PATH
-    "Directory to install Z3 Java jar file relative to install prefix"
-  )
-  # FIXME: I don't think this the right installation location
-  set(Z3_JAVA_JNI_LIB_INSTALLDIR
-    "${CMAKE_INSTALL_LIBDIR}"
-    CACHE
-    PATH
-    "Directory to install Z3 Java JNI bridge library relative to install prefix"
-  )
+  if (NOT Z3_JAVA_JAR_INSTALLDIR)
+     set(Z3_JAVA_JAR_INSTALLDIR
+       "${CMAKE_INSTALL_DATAROOTDIR}/java"
+       CACHE
+       PATH
+       "Directory to install Z3 Java jar file relative to install prefix"
+     )
+  endif()
+  if (NOT Z3_JAVA_JNI_LIB_INSTALLDIR)
+    set(Z3_JAVA_JNI_LIB_INSTALLDIR
+       "${CMAKE_INSTALL_LIBDIR}"
+       CACHE
+       PATH
+       "Directory to install Z3 Java JNI bridge library relative to install prefix"
+     )
+  endif()
   install(TARGETS z3java DESTINATION "${Z3_JAVA_JNI_LIB_INSTALLDIR}")
-  # Note: Don't use ``DESTINATION`` here as the version of ``UseJava.cmake`` shipped
-  # with CMake 2.8.12.2 handles that incorrectly.
   install_jar(z3JavaJar "${Z3_JAVA_JAR_INSTALLDIR}")
 endif()

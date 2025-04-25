@@ -41,14 +41,11 @@ struct bv_bound_chk_rewriter_cfg : public default_rewriter_cfg {
     bv_bound_chk_rewriter_cfg(ast_manager & m, bv_bound_chk_stats& stats)
         : m_m(m), m_b_rw(m), m_stats(stats) {}
 
-    ~bv_bound_chk_rewriter_cfg() {}
-
     void updt_params(params_ref const & _p) {
         rewriter_params p(_p);
         m_bv_ineq_consistency_test_max = p.bv_ineq_consistency_test_max();        
         m_max_memory = p.max_memory();
         m_max_steps = p.max_steps();
-
     }
 
     ast_manager & m() const { return m_m; }
@@ -109,8 +106,6 @@ struct bv_bound_chk_rewriter : public rewriter_tpl<bv_bound_chk_rewriter_cfg> {
         updt_params(p);
     }
 
-    ~bv_bound_chk_rewriter() override {}
-
     void updt_params(params_ref const & _p) {
         m_cfg.updt_params(_p);
     }
@@ -140,6 +135,7 @@ public:
     void cleanup() override;
     void collect_statistics(statistics & st) const override;
     void reset_statistics() override;
+    char const* name() const override { return "bv_bound_chk"; }
 };
 
 class bv_bound_chk_tactic::imp {
@@ -147,8 +143,6 @@ class bv_bound_chk_tactic::imp {
 public:
     imp(ast_manager & m, params_ref const & p, bv_bound_chk_stats& stats)
         : m_rw(m, p, stats) {    }
-
-    virtual ~imp() {    }
 
     ast_manager& m() { return m_rw.m(); }
 
@@ -166,7 +160,7 @@ public:
         m_rw.m_cfg.cleanup();
     }
 
-    virtual void updt_params(params_ref const & p) {
+    void updt_params(params_ref const & p) {
         m_rw.updt_params(p);
     }
 
@@ -205,8 +199,8 @@ tactic * bv_bound_chk_tactic::translate(ast_manager & m) {
 
 
 void bv_bound_chk_tactic::updt_params(params_ref const & p) {
-    m_params = p;
-    m_imp->updt_params(p);
+    m_params.append(p);
+    m_imp->updt_params(m_params);
 }
 
 void bv_bound_chk_tactic::cleanup() {

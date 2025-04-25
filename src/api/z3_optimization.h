@@ -28,10 +28,10 @@ extern "C" {
 #endif // __cplusplus
 
     /** \defgroup capi C API */
-    /*@{*/
+    /**@{*/
 
     /** @name Optimization facilities */
-    /*@{*/
+    /**@{*/
     /**
        \brief Create a new optimize context.
 
@@ -82,7 +82,7 @@ extern "C" {
        \param c - context
        \param o - optimization context
        \param a - formula
-       \param weight - a positive weight, penalty for violating soft constraint
+       \param weight - a penalty for violating soft constraint. Negative weights convert into rewards.
        \param id - optional identifier to group soft constraints
 
        \sa Z3_optimize_assert
@@ -140,6 +140,18 @@ extern "C" {
     void Z3_API Z3_optimize_pop(Z3_context c, Z3_optimize d);
 
     /**
+       \brief provide an initialization hint to the solver.
+       The initialization hint is used to calibrate an initial value of the expression that
+       represents a variable. If the variable is Boolean, the initial phase is set
+       according to \c value. If the variable is an integer or real,
+       the initial Simplex tableau is recalibrated to attempt to follow the value assignment.
+
+       def_API('Z3_optimize_set_initial_value', VOID, (_in(CONTEXT), _in(OPTIMIZE), _in(AST), _in(AST)))
+     */
+
+    void Z3_API Z3_optimize_set_initial_value(Z3_context c, Z3_optimize o, Z3_ast v, Z3_ast val);
+    
+    /**
        \brief Check consistency and produce optimal values.
        \param c - context
        \param o - optimization context
@@ -151,7 +163,7 @@ extern "C" {
        \sa Z3_optimize_get_statistics
        \sa Z3_optimize_get_unsat_core
 
-       def_API('Z3_optimize_check', INT, (_in(CONTEXT), _in(OPTIMIZE), _in(UINT), _in_array(2, AST)))
+       def_API('Z3_optimize_check', LBOOL, (_in(CONTEXT), _in(OPTIMIZE), _in(UINT), _in_array(2, AST)))
     */
     Z3_lbool Z3_API Z3_optimize_check(Z3_context c, Z3_optimize o, unsigned num_assumptions, Z3_ast const assumptions[]);
 
@@ -368,8 +380,8 @@ extern "C" {
         Z3_model_eh  model_eh);
 
 
-    /*@}*/
-    /*@}*/
+    /**@}*/
+    /**@}*/
 
 #ifdef __cplusplus
 }

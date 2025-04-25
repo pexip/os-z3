@@ -20,6 +20,7 @@ Revision History:
 
 #include "ast/ast.h"
 #include "ast/rewriter/rewriter.h"
+#include "ast/rewriter/rewriter_def.h"
 #include "params/pattern_inference_params.h"
 #include "util/vector.h"
 #include "util/uint_set.h"
@@ -37,7 +38,6 @@ Revision History:
    every instance of f(g(X)) is also an instance of f(X).
 */
 class smaller_pattern {
-    ast_manager &    m;
     ptr_vector<expr> m_bindings;
 
     typedef std::pair<expr *, expr *> expr_pair;
@@ -48,13 +48,11 @@ class smaller_pattern {
     void save(expr * p1, expr * p2);
     bool process(expr * p1, expr * p2);
 
-    smaller_pattern & operator=(smaller_pattern const &); 
-
 public:
 
-    smaller_pattern(ast_manager & m):
-        m(m) {
-    }
+    smaller_pattern() = default;
+
+    smaller_pattern & operator=(smaller_pattern const &) = delete;
 
     bool operator()(unsigned num_bindings, expr * p1, expr * p2);
 };
@@ -72,6 +70,7 @@ class pattern_inference_cfg :  public default_rewriter_cfg {
     expr * const *             m_no_patterns;
     bool                       m_nested_arith_only;
     bool                       m_block_loop_patterns;
+    bool                       m_decompose_patterns;
 
     struct info {
         uint_set m_free_vars;
@@ -115,9 +114,9 @@ class pattern_inference_cfg :  public default_rewriter_cfg {
     //
     class collect {
         struct entry {
-            expr *    m_node;
-            unsigned  m_delta;
-            entry():m_node(nullptr), m_delta(0) {}
+            expr *    m_node = nullptr;
+            unsigned  m_delta = 0;
+            entry() = default;
             entry(expr * n, unsigned d):m_node(n), m_delta(d) {}
             unsigned hash() const { 
                 return hash_u_u(m_node->get_id(), m_delta);
@@ -190,6 +189,9 @@ class pattern_inference_cfg :  public default_rewriter_cfg {
 
     ptr_vector<pre_pattern>      m_pre_patterns;
     expr_pattern_match           m_database;
+
+    ptr_buffer<app> m_args;
+    app* mk_pattern(app* candidate);
 
     void candidates2unary_patterns(ptr_vector<app> const & candidate_patterns,
                                    ptr_vector<app> & remaining_candidate_patterns,

@@ -102,6 +102,7 @@ namespace smt2 {
         symbol               m_declare_const;
         symbol               m_define_sort;
         symbol               m_declare_sort;
+        symbol               m_declare_type_var;
         symbol               m_declare_datatypes;
         symbol               m_declare_datatype;
         symbol               m_par;
@@ -115,6 +116,7 @@ namespace smt2 {
         symbol               m_match;
         symbol               m_case;
         symbol               m_underscore;
+        contains_vars        m_has_free_vars;
 
         typedef std::pair<symbol, expr*> named_expr;
         named_expr           m_last_named_expr;
@@ -372,8 +374,8 @@ namespace smt2 {
                     return true;
                 }
                 catch (scanner_exception & ex) {
-                    SASSERT(ex.has_pos());
-                    error(ex.line(), ex.pos(), ex.msg());
+                    if (ex.has_pos())
+                        error(ex.line(), ex.pos(), ex.msg());
                     ++num_errors;
                 }
             }
@@ -856,6 +858,26 @@ namespace smt2 {
             if (ct_decls.empty())
                 throw parser_exception("invalid datatype declaration, datatype does not have any constructors");
         }
+
+        void parse_declare_type_var() {
+            SASSERT(curr_is_identifier());
+            SASSERT(curr_id() == m_declare_type_var);
+            next();
+
+            check_nonreserved_identifier("invalid sort declaration, symbol expected");
+            symbol id = curr_id();
+            if (m_ctx.find_psort_decl(id) != nullptr)
+                throw parser_exception("invalid sort declaration, sort already declared/defined");
+            next();
+            check_rparen("invalid sort declaration, ')' expected");
+            
+            psort_decl * decl = pm().mk_psort_type_var_decl(id);
+            m_ctx.insert(decl);
+            
+            m_ctx.print_success();
+            next();
+
+        }
         
         void parse_declare_datatypes() {
             SASSERT(curr_is_identifier());
@@ -921,7 +943,6 @@ namespace smt2 {
             }
             for (unsigned i = 0; i < sz; i++) {
                 pdatatype_decl * d = new_dt_decls[i];
-                symbol duplicated;
                 check_duplicate(d, line, pos);
                 if (!is_smt2_6) {
                     // datatypes are inserted up front in SMT2.6 mode, so no need to re-insert them.
@@ -942,6 +963,7 @@ namespace smt2 {
             unsigned line = m_scanner.get_line();
             unsigned pos  = m_scanner.get_pos();
             symbol dt_name = curr_id();
+            check_identifier("unexpected token used as datatype name");
             next();
 
             m_dt_name2idx.reset();
@@ -1010,7 +1032,7 @@ namespace smt2 {
 
         void name_expr(expr * n, symbol const & s) {
             TRACE("name_expr", tout << "naming: " << s << " ->\n" << mk_pp(n, m()) << "\n";);
-            if (!is_ground(n) && has_free_vars(n))
+            if (!is_ground(n) && m_has_free_vars(n))
                 throw parser_exception("invalid named expression, expression contains free variables");
             m_ctx.insert(s, 0, nullptr, n);
             m_last_named_expr.first  = s;
@@ -2470,6 +2492,10 @@ namespace smt2 {
             next();
         }
 
+        /**
+         * (declare-fun f (sorts) sort)
+         * (declare-fun (alphas) (sorts) sort)
+         */
         void parse_declare_fun() {
             SASSERT(curr_is_identifier());
             SASSERT(curr_id() == m_declare_fun);
@@ -2636,8 +2662,6 @@ namespace smt2 {
             check_lparen_next("invalid get-value command, '(' expected");
             while (!curr_is_rparen()) {
                 parse_expr();
-                if (!is_ground(expr_stack().back()))
-                    throw cmd_exception("invalid get-value term, term must be ground and must not contain quantifiers");
                 m_cached_strings.push_back(m_scanner.cached_str(cache_it, m_cache_end));
                 cache_it = m_cache_end;
             }
@@ -2676,7 +2700,7 @@ namespace smt2 {
                     m_ctx.regular_stream() << "\n ";
                 m_ctx.regular_stream() << "(" << m_cached_strings[i] << " ";
                 m_ctx.display(m_ctx.regular_stream(), v);
-                m_ctx.regular_stream() << ")";
+                m_ctx.regular_stream() << ")";                
             }
             m_ctx.regular_stream() << ")" << std::endl;
             expr_stack().shrink(spos);
@@ -2973,6 +2997,10 @@ namespace smt2 {
                 parse_declare_sort();
                 return;
             }
+            if (s == m_declare_type_var) {
+                parse_declare_type_var();
+                return;
+            }
             if (s == m_declare_datatypes) {
                 parse_declare_datatypes();
                 return;
@@ -3046,6 +3074,7 @@ namespace smt2 {
             m_declare_const("declare-const"),
             m_define_sort("define-sort"),
             m_declare_sort("declare-sort"),
+            m_declare_type_var("declare-type-var"),
             m_declare_datatypes("declare-datatypes"),
             m_declare_datatype("declare-datatype"),
             m_par("par"),
@@ -3101,6 +3130,10 @@ namespace smt2 {
 
         }
 
+        void reset_input(std::istream & is, bool interactive) {
+            m_scanner.reset_input(is, interactive);
+        }
+
         sexpr_ref parse_sexpr_ref() {
             m_num_bindings    = 0;
             m_num_open_paren = 0;
@@ -3117,6 +3150,23 @@ namespace smt2 {
             }
             return sexpr_ref(nullptr, sm());
         }
+
+        sort_ref parse_sort_ref(char const* context) {
+            m_num_bindings    = 0;
+            m_num_open_paren = 0;
+
+            try {
+                scan_core();
+                parse_sort(context);
+                if (!sort_stack().empty()) 
+                    return sort_ref(sort_stack().back(), m());
+            }
+            catch (z3_exception & ex) {
+                error(ex.msg());
+            }
+            return sort_ref(nullptr, m());
+        }
+
 
         bool operator()() {
             m_num_bindings    = 0;
@@ -3183,11 +3233,26 @@ namespace smt2 {
             }
         }
     };
+
+    void free_parser(parser * p) { dealloc(p); }
 };
 
 bool parse_smt2_commands(cmd_context & ctx, std::istream & is, bool interactive, params_ref const & ps, char const * filename) {
     smt2::parser p(ctx, is, interactive, ps, filename);
     return p();
+}
+
+bool parse_smt2_commands_with_parser(class smt2::parser *& p, cmd_context & ctx, std::istream & is, bool interactive, params_ref const & ps, char const * filename) {
+    if (p)
+        p->reset_input(is, interactive);
+    else
+        p = alloc(smt2::parser, ctx, is, interactive, ps, filename);
+    return (*p)();
+}
+
+sort_ref parse_smt2_sort(cmd_context & ctx, std::istream & is, bool interactive, params_ref const & ps, char const * filename) {
+    smt2::parser p(ctx, is, interactive, ps, filename);
+    return p.parse_sort_ref(filename);
 }
 
 sexpr_ref parse_sexpr(cmd_context& ctx, std::istream& is, params_ref const& ps, char const* filename) {

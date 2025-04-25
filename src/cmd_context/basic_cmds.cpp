@@ -58,7 +58,7 @@ public:
         cmd * c = ctx.find_cmd(s);
         if (c == nullptr) {
             std::string err_msg("unknown command '");
-            err_msg = err_msg + s.bare_str() + "'";
+            err_msg = err_msg + s.str() + "'";
             throw cmd_exception(std::move(err_msg));
         }
         m_cmds.push_back(s);
@@ -177,10 +177,10 @@ ATOMIC_CMD(get_proof_cmd, "get-proof", "retrieve proof", {
     if (!ctx.has_manager())
         throw cmd_exception("proof is not available");
 
-    if (ctx.ignore_check())
-        return;
     expr_ref pr(ctx.m());
     auto* chsr = ctx.get_check_sat_result();
+    if (!chsr && ctx.ignore_check())
+        return;
     if (!chsr)
         throw cmd_exception("proof is not available");
     pr = chsr->get_proof();
@@ -202,6 +202,7 @@ ATOMIC_CMD(get_proof_cmd, "get-proof", "retrieve proof", {
         cmd_is_declared isd(ctx);
         pp.set_is_declared(&isd);
         pp.set_logic(ctx.get_logic());
+        pp.set_simplify_implies(params.simplify_implies());
         pp.display_smt2(ctx.regular_stream(), pr);
         ctx.regular_stream() << std::endl;
     }
@@ -219,9 +220,8 @@ ATOMIC_CMD(get_proof_graph_cmd, "get-proof-graph", "retrieve proof and print it 
     pr = ctx.get_check_sat_result()->get_proof();
     if (pr == 0)
         throw cmd_exception("proof is not available");
-    if (ctx.well_sorted_check_enabled() && !is_well_sorted(ctx.m(), pr)) {
+    if (ctx.well_sorted_check_enabled() && !is_well_sorted(ctx.m(), pr)) 
         throw cmd_exception("proof is not well sorted");
-    }
 
     context_params& params = ctx.params();
     const std::string& file = params.m_dot_proof_file;
@@ -235,11 +235,11 @@ static void print_core(cmd_context& ctx) {
     ctx.regular_stream() << "(";
     bool first = true;
     for (expr* e : core) {
-    if (first)
-        first = false;
-    else
-        ctx.regular_stream() << " ";
-    ctx.regular_stream() << mk_ismt2_pp(e, ctx.m());
+        if (first)
+            first = false;
+        else
+            ctx.regular_stream() << " ";
+        ctx.regular_stream() << mk_ismt2_pp(e, ctx.m());
     }
     ctx.regular_stream() << ")" << std::endl;
 }
@@ -260,9 +260,8 @@ ATOMIC_CMD(get_unsat_assumptions_cmd, "get-unsat-assumptions", "retrieve subset 
             return;
         if (!ctx.produce_unsat_assumptions())
             throw cmd_exception("unsat assumptions construction is not enabled, use command (set-option :produce-unsat-assumptions true)");
-        if (!ctx.has_manager() || ctx.cs_state() != cmd_context::css_unsat) {
+        if (!ctx.has_manager() || ctx.cs_state() != cmd_context::css_unsat) 
             throw cmd_exception("unsat assumptions is not available");
-        }
         print_core(ctx);
     });
 
@@ -301,10 +300,39 @@ UNARY_CMD(pp_cmd, "display", "<term>", "display the given term.", CPK_EXPR, expr
     ctx.regular_stream() << std::endl;
 });
 
-UNARY_CMD(echo_cmd, "echo", "<string>", "display the given string", CPK_STRING, char const *,
-    bool smt2c = ctx.params().m_smtlib2_compliant;
-    ctx.regular_stream() << (smt2c ? "\"" : "") << arg << (smt2c ? "\"" : "") << std::endl;);
+static std::string escape_string(char const* arg) {
+    std::string result;
+    while (*arg) {
+        auto ch = *arg++;
+        if (ch == '"')
+            result.push_back(ch);
+        result.push_back(ch);
+    }
+    return result;
+}
 
+UNARY_CMD(echo_cmd, "echo", "<string>", "display the given string", CPK_STRING, char const *,
+          bool smt2c = ctx.params().m_smtlib2_compliant;
+          if (smt2c) 
+              ctx.regular_stream() << "\"" << escape_string(arg) << "\"" << std::endl;
+          else
+              ctx.regular_stream() << arg << std::endl;);
+
+class set_initial_value_cmd : public cmd {
+    expr* m_var = nullptr, *m_value = nullptr;
+public:
+    set_initial_value_cmd(): cmd("set-initial-value") {}
+    char const* get_usage() const override { return "<var> <value>"; }
+    char const* get_descr(cmd_context& ctx) const override { return "set an initial value for search as a hint to the solver"; }
+    unsigned get_arity() const override { return 2; }
+    void prepare(cmd_context& ctx) override { m_var = m_value = nullptr; }
+    cmd_arg_kind next_arg_kind(cmd_context& ctx) const override { return CPK_EXPR; }
+    void set_next_arg(cmd_context& ctx, expr* e) override { if (m_var) m_value = e; else m_var = e; }
+    void execute(cmd_context& ctx) override {
+        SASSERT(m_var && m_value);
+        ctx.set_initial_value(m_var, m_value);
+    }    
+};
 
 class set_get_option_cmd : public cmd {
 protected:
@@ -368,8 +396,6 @@ public:
         m_int_real_coercions(":int-real-coercions"),
         m_reproducible_resource_limit(":reproducible-resource-limit") {
     }
-    ~set_get_option_cmd() override {}
-
 };
 
 class set_option_cmd : public set_get_option_cmd {
@@ -393,6 +419,15 @@ class set_option_cmd : public set_get_option_cmd {
             std::string msg = "error setting '";
             msg += opt_name.str();
             msg += "', option value cannot be modified after initialization";
+            throw cmd_exception(std::move(msg));
+        }
+    }
+
+    static void check_no_assertions(cmd_context & ctx, symbol const & opt_name) {
+        if (ctx.has_assertions()) {
+            std::string msg = "error setting '";
+            msg += opt_name.str();
+            msg += "', option value cannot be modified after assertions have been added";
             throw cmd_exception(std::move(msg));
         }
     }
@@ -424,11 +459,11 @@ class set_option_cmd : public set_get_option_cmd {
             ctx.set_interactive_mode(to_bool(value));
         }
         else if (m_option == m_produce_proofs) {
-            check_not_initialized(ctx, m_produce_proofs);
+            check_no_assertions(ctx, m_produce_proofs);
             ctx.set_produce_proofs(to_bool(value));
         }
         else if (m_option == m_produce_unsat_cores) {
-            check_not_initialized(ctx, m_produce_unsat_cores);
+            check_no_assertions(ctx, m_produce_unsat_cores);
             ctx.set_produce_unsat_cores(to_bool(value));
         }
         else if (m_option == m_produce_unsat_assumptions) {
@@ -804,9 +839,9 @@ public:
         sort_ref range(ctx.m());
         array_sort_args.push_back(m_f->get_range());
         range = array_sort->instantiate(ctx.pm(), array_sort_args.size(), array_sort_args.data());
-        parameter p[1] = { parameter(m_f) };
+        parameter p(m_f);
         func_decl_ref new_map(ctx.m());
-        new_map = ctx.m().mk_func_decl(get_array_fid(ctx), OP_ARRAY_MAP, 1, p, domain.size(), domain.data(), range.get());
+        new_map = ctx.m().mk_func_decl(get_array_fid(ctx), OP_ARRAY_MAP, 1, &p, domain.size(), domain.data(), range.get());
         if (new_map == 0)
             throw cmd_exception("invalid array map operator");
         ctx.insert(m_name, new_map);
@@ -874,6 +909,7 @@ void install_basic_cmds(cmd_context & ctx) {
     ctx.insert(alloc(get_option_cmd));
     ctx.insert(alloc(get_info_cmd));
     ctx.insert(alloc(set_info_cmd));
+    ctx.insert(alloc(set_initial_value_cmd));
     ctx.insert(alloc(get_consequences_cmd));
     ctx.insert(alloc(builtin_cmd, "assert", "<term>", "assert term."));
     ctx.insert(alloc(builtin_cmd, "check-sat", "<boolean-constants>*", "check if the current context is satisfiable. If a list of boolean constants B is provided, then check if the current context is consistent with assigning every constant in B to true."));

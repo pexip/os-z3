@@ -30,7 +30,7 @@ namespace sat {
 
     typedef svector<bool_var> bool_var_vector;
 
-    const bool_var null_bool_var  = UINT_MAX >> 1;
+    inline constexpr bool_var null_bool_var = UINT_MAX >> 1;
 
     /**
        \brief The literal b is represented by the value 2*b, and
@@ -39,9 +39,7 @@ namespace sat {
     class literal {
         unsigned  m_val;
     public:
-        literal():m_val(null_bool_var << 1) {
-            SASSERT(var() == null_bool_var && !sign());
-        }
+        constexpr literal(): m_val(null_bool_var << 1) { }
 
         explicit literal(bool_var v, bool _sign = false):
             m_val((v << 1) + static_cast<unsigned>(_sign)) {
@@ -49,11 +47,11 @@ namespace sat {
             SASSERT(sign() == _sign);
         }
 
-        bool_var var() const {
+        constexpr bool_var var() const {
             return m_val >> 1;
         }
 
-        bool sign() const {
+        constexpr bool sign() const {
             return m_val & 1ul;
         }
 
@@ -86,7 +84,10 @@ namespace sat {
         friend bool operator!=(literal const & l1, literal const & l2);
     };
 
-    const literal null_literal;
+    inline constexpr literal null_literal;
+    static_assert(null_literal.var() == null_bool_var);
+    static_assert(!null_literal.sign());
+
     using literal_hash = obj_hash<literal>;
 
     inline literal to_literal(unsigned x) { literal l; l.m_val = x; return l; }
@@ -95,6 +96,7 @@ namespace sat {
     inline bool operator!=(literal const & l1, literal const & l2) { return l1.m_val != l2.m_val; }
 
     inline std::ostream & operator<<(std::ostream & out, sat::literal l) { if (l == sat::null_literal) out << "null"; else out << (l.sign() ? "-" : "") << l.var(); return out; }
+    
 
 
     typedef svector<literal> literal_vector;
@@ -109,17 +111,15 @@ namespace sat {
 
     inline void negate(literal_vector& ls) { for (unsigned i = 0; i < ls.size(); ++i) ls[i].neg(); }
 
-    typedef tracked_uint_set uint_set;
-
-    typedef uint_set bool_var_set;
+    typedef tracked_uint_set bool_var_set;
 
     class literal_set {
-        uint_set m_set;
+        tracked_uint_set m_set;
     public:
         literal_set(literal_vector const& v) {
             for (unsigned i = 0; i < v.size(); ++i) insert(v[i]);
         }
-        literal_set() {}
+        literal_set() = default;
         literal_vector to_vector() const {
             literal_vector result;
             for (literal lit : *this) result.push_back(lit);
@@ -140,13 +140,12 @@ namespace sat {
         void reset() { m_set.reset(); }
         void finalize() { m_set.finalize(); }
         class iterator {
-            uint_set::iterator m_it;
+            tracked_uint_set::iterator m_it;
         public:
-            iterator(uint_set::iterator it):m_it(it) {}
+            iterator(tracked_uint_set::iterator it):m_it(it) {}
             literal operator*() const { return to_literal(*m_it); }
             iterator& operator++() { ++m_it; return *this; }
             iterator operator++(int) { iterator tmp = *this; ++m_it; return tmp; }
-            bool operator==(iterator const& it) const { return m_it == it.m_it; }
             bool operator!=(iterator const& it) const { return m_it != it.m_it; }
         };
         iterator begin() const { return iterator(m_set.begin()); }
@@ -191,4 +190,12 @@ namespace sat {
         return out << mk_lits_pp(ls.size(), ls.data());
     }
 
+};
+
+namespace std {
+
+    inline std::string to_string(sat::literal l) {
+        if (l.sign()) return "-" + to_string(l.var());
+        return to_string(l.var());
+    }
 };

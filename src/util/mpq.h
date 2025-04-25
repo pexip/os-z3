@@ -23,21 +23,18 @@ Revision History:
 
 class mpq {
     mpz m_num;
-    mpz m_den;
+    mpz m_den = 1;
     friend class mpq_manager<true>;
     friend class mpq_manager<false>;
 public:
-    mpq(int v):m_num(v), m_den(1) {}
-    mpq():m_den(1) {}
+    mpq(int v) : m_num(v) {}
+    mpq() = default;
     mpq(mpq &&) noexcept = default;
     mpq & operator=(mpq&&) = default;
     mpq & operator=(mpq const&) = delete;
-    void swap(mpq & other) { m_num.swap(other.m_num); m_den.swap(other.m_den); }
     mpz const & numerator() const { return m_num; }
     mpz const & denominator() const { return m_den; }
 };
-
-inline void swap(mpq & m1, mpq & m2) { m1.swap(m2); }
 
 template<bool SYNCH = true>
 class mpq_manager : public mpz_manager<SYNCH> {
@@ -50,7 +47,7 @@ class mpq_manager : public mpz_manager<SYNCH> {
 
     void reset_denominator(mpq & a) {
         del(a.m_den);
-        a.m_den.m_val = 1;
+        a.m_den.set(1);
     }
 
     void normalize(mpq & a) {
@@ -115,7 +112,7 @@ public:
     static bool precise() { return true; }
     static bool field() { return true; }
 
-    mpq_manager();
+    mpq_manager() = default;
 
     ~mpq_manager();
 
@@ -490,6 +487,8 @@ public:
 
     void machine_div_rem(mpz const & a, mpz const & b, mpz & c, mpz & d) { mpz_manager<SYNCH>::machine_div_rem(a, b, c, d); }
 
+    void machine_div2k(mpz const & a, unsigned k, mpz & c) { mpz_manager<SYNCH>::machine_div2k(a, k, c); }
+
     void div(mpz const & a, mpz const & b, mpz & c) { mpz_manager<SYNCH>::div(a, b, c); }
     
     void rat_div(mpz const & a, mpz const & b, mpq & c) {
@@ -514,6 +513,12 @@ public:
     void machine_idiv(mpq const & a, mpq const & b, mpz & c) {
         SASSERT(is_int(a) && is_int(b));
         machine_div(a.m_num, b.m_num, c);
+    }
+
+    void machine_idiv2k(mpq const & a, unsigned k, mpq & c) {
+        SASSERT(is_int(a));
+        machine_div2k(a.m_num, k, c.m_num);
+        reset_denominator(c);
     }
 
     void idiv(mpq const & a, mpq const & b, mpq & c) {
@@ -756,9 +761,9 @@ public:
         return temp;
     }
 
-    void swap(mpz & a, mpz & b) { mpz_manager<SYNCH>::swap(a, b); }
+    void swap(mpz & a, mpz & b) noexcept { mpz_manager<SYNCH>::swap(a, b); }
 
-    void swap(mpq & a, mpq & b) {
+    void swap(mpq & a, mpq & b) noexcept {
         swap(a.m_num, b.m_num);
         swap(a.m_den, b.m_den);
     }
@@ -842,6 +847,14 @@ public:
     */
     unsigned prev_power_of_two(mpz const & a) { return mpz_manager<SYNCH>::prev_power_of_two(a); }
     unsigned prev_power_of_two(mpq const & a);
+
+    /**
+       \brief Return the smallest k s.t. a <= 2^k.
+
+       \remark Return 0 if a is not positive.
+    */
+    unsigned next_power_of_two(mpz const & a) { return mpz_manager<SYNCH>::next_power_of_two(a); }
+    unsigned next_power_of_two(mpq const & a);
 
     bool is_int_perfect_square(mpq const & a, mpq & r) {
         SASSERT(is_int(a));

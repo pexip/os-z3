@@ -19,6 +19,7 @@ Revision History:
 #pragma once
 
 #include<cstdlib>
+#include<memory>
 #include<ostream>
 #include<iomanip>
 #include "util/z3_exception.h"
@@ -105,18 +106,14 @@ ALLOC_ATTR T * alloc_vect(unsigned sz);
 template<typename T>
 T * alloc_vect(unsigned sz) {
     T * r = static_cast<T*>(memory::allocate(sizeof(T) * sz));
-    T * curr = r;
-    for (unsigned i = 0; i < sz; i++, curr++) 
-        new (curr) T();
+    std::uninitialized_default_construct_n(r, sz);
     return r;
 }
 
 template<typename T>
 void dealloc_vect(T * ptr, unsigned sz) {
     if (ptr == nullptr) return;
-    T * curr = ptr;
-    for (unsigned i = 0; i < sz; i++, curr++)
-        curr->~T();
+    std::destroy_n(ptr, sz);
     memory::deallocate(ptr);
 }
 
@@ -127,6 +124,29 @@ void dealloc_svect(T * ptr) {
     if (ptr == nullptr) return;
     memory::deallocate(ptr);
 }
+
+template <typename T>
+struct std_allocator {
+    using value_type = T;
+    // the constructors must be provided according to cpp docs
+    std_allocator() = default;
+    template <class U> constexpr std_allocator(const std_allocator<U>&) noexcept {}
+ 
+
+    T* allocate(std::size_t n) {
+        return static_cast<T*>(memory::allocate(n * sizeof(T)));
+    }
+
+    void deallocate(T* p, std::size_t n) {
+        memory::deallocate(p);
+    }
+};
+
+// the comparison operators must be provided according to cpp docs
+template <class T, class U>
+bool operator==(const std_allocator<T>&, const std_allocator<U>&) { return true; }
+template <class T, class U>
+bool operator!=(const std_allocator<T>&, const std_allocator<U>&) { return false; }
 
 struct mem_stat {
 };

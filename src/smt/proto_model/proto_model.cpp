@@ -32,7 +32,7 @@ proto_model::proto_model(ast_manager & m, params_ref const & p):
     model_core(m),
     m_eval(*this),
     m_rewrite(m) {
-    register_factory(alloc(basic_factory, m));
+    register_factory(alloc(basic_factory, m, m.get_num_asts()));
     m_user_sort_factory = alloc(user_sort_factory, m);
     register_factory(m_user_sort_factory);
     m_model_partial = model_params(p).partial();
@@ -213,11 +213,12 @@ void proto_model::cleanup() {
     TRACE("model_bug", model_v2_pp(tout, *this););
     func_decl_set found_aux_fs;
     expr_ref_vector trail(m);
-    for (auto const& kv : m_finterp) {
-        TRACE("model_bug", tout << kv.m_key->get_name() << "\n";);
-        func_interp * fi = kv.m_value;
+    ptr_buffer<func_interp> finterps;
+    for (auto const& kv : m_finterp)
+        finterps.push_back(kv.m_value);
+    for (auto* fi : finterps)         
         cleanup_func_interp(trail, fi, found_aux_fs);
-    }
+    
     for (unsigned i = 0; i < m_const_decls.size(); ++i) {
         func_decl* d = m_const_decls[i];
         expr* e = m_interp[d].second;
@@ -287,42 +288,33 @@ bool proto_model::is_finite(sort * s) const {
 }
 
 expr * proto_model::get_some_value(sort * s) {
-    if (m.is_uninterp(s)) {
-        return m_user_sort_factory->get_some_value(s);
-    }
-    else if (value_factory * f = get_factory(s->get_family_id())) {
-        return f->get_some_value(s);
-    }
-    else {
+    if (m.is_uninterp(s)) 
+        return m_user_sort_factory->get_some_value(s);    
+    else if (value_factory * f = get_factory(s->get_family_id())) 
+        return f->get_some_value(s);    
+    else 
         // there is no factory for the family id, then assume s is uninterpreted.
-        return m_user_sort_factory->get_some_value(s);
-    }
+        return m_user_sort_factory->get_some_value(s);    
 }
 
 bool proto_model::get_some_values(sort * s, expr_ref & v1, expr_ref & v2) {
-    if (m.is_uninterp(s)) {
-        return m_user_sort_factory->get_some_values(s, v1, v2);
-    }
-    else if (value_factory * f = get_factory(s->get_family_id())) {
-        return f->get_some_values(s, v1, v2);
-    }
-    else {
-        return false;
-    }
+    if (m.is_uninterp(s)) 
+        return m_user_sort_factory->get_some_values(s, v1, v2);    
+    else if (value_factory * f = get_factory(s->get_family_id())) 
+        return f->get_some_values(s, v1, v2);    
+    else 
+        return false;    
 }
 
 expr * proto_model::get_fresh_value(sort * s) {
-    if (m.is_uninterp(s)) {
-        return m_user_sort_factory->get_fresh_value(s);
-    }
-    else if (value_factory * f = get_factory(s->get_family_id())) {
-        return f->get_fresh_value(s);
-    }
-    else {
+    if (m.is_uninterp(s)) 
+        return m_user_sort_factory->get_fresh_value(s);    
+    else if (value_factory * f = get_factory(s->get_family_id())) 
+        return f->get_fresh_value(s);    
+    else 
         // Use user_sort_factory if the theory has no support for model construnction.
         // This is needed when dummy theories are used for arithmetic or arrays.
-        return m_user_sort_factory->get_fresh_value(s);
-    }
+        return m_user_sort_factory->get_fresh_value(s);    
 }
 
 void proto_model::register_value(expr * n) {

@@ -21,17 +21,18 @@ Notes:
 #include "ast/rewriter/poly_rewriter.h"
 #include "ast/arith_decl_plugin.h"
 #include "ast/seq_decl_plugin.h"
+#include "math/polynomial/algebraic_numbers.h"
 
 class arith_rewriter_core {
 protected:
     typedef rational numeral;
+    ast_manager& m;
     arith_util  m_util;
     scoped_ptr<seq_util> m_seq;
-    bool        m_expand_power{ false };
-    bool        m_mul2power{ false };
-    bool        m_expand_tan{ false };
+    bool        m_expand_power = false;
+    bool        m_mul2power = false;
+    bool        m_expand_tan = false;
     
-    ast_manager & m() const { return m_util.get_manager(); }
     family_id get_fid() const { return m_util.get_family_id(); }
     seq_util& seq();
     
@@ -47,7 +48,7 @@ protected:
     app* mk_power(expr* x, rational const& r, sort* s);
     expr* coerce(expr* x, sort* s);
 public:
-    arith_rewriter_core(ast_manager & m):m_util(m) {}
+    arith_rewriter_core(ast_manager & m):m(m), m_util(m) {}
     bool is_zero(expr * n) const { return m_util.is_zero(n); }
 };
 
@@ -62,6 +63,7 @@ class arith_rewriter : public poly_rewriter<arith_rewriter_core> {
     bool m_eq2ineq;
     unsigned m_max_degree;
 
+    bool get_range(expr* e, rational& lo, rational& hi);
     void get_coeffs_gcd(expr * t, numeral & g, bool & first, unsigned & num_consts);
     enum const_treatment { CT_FLOOR, CT_CEIL, CT_FALSE };
     bool div_polynomial(expr * t, numeral const & g, const_treatment ct, expr_ref & result);
@@ -80,6 +82,7 @@ class arith_rewriter : public poly_rewriter<arith_rewriter_core> {
     void updt_local_params(params_ref const & p);
 
     bool is_anum_simp_target(unsigned num_args, expr * const * args);
+    bool is_algebraic_numeral(expr* n, scoped_anum& a);
 
     br_status mk_div_irrat_rat(expr * arg1, expr * arg2, expr_ref & result);
     br_status mk_div_rat_irrat(expr * arg1, expr * arg2, expr_ref & result);
@@ -97,14 +100,16 @@ class arith_rewriter : public poly_rewriter<arith_rewriter_core> {
     bool is_2_pi_integer_offset(expr * t, expr * & m);
     bool is_pi_integer(expr * t);
     bool is_pi_integer_offset(expr * t, expr * & m);
-    bool is_neg_poly(expr* e, expr_ref& neg) const;
-    expr_ref neg_monomial(expr * e) const;
+    bool is_neg_poly(expr* e, expr_ref& neg);
+    expr_ref neg_monomial(expr * e);
     expr * mk_sin_value(rational const & k);
     app * mk_sqrt(rational const & k);
-    bool divides(expr* d, expr* n, expr_ref& result);
+    bool get_divides(expr* d, expr* n, expr_ref& result);
     expr_ref remove_divisor(expr* arg, expr* num, expr* den); 
     void flat_mul(expr* e, ptr_buffer<expr>& args); 
-    void remove_divisor(expr* d, ptr_buffer<expr>& args); 
+    void remove_divisor(expr* d, ptr_buffer<expr>& args);
+
+    bool mk_eq_mod(expr* arg1, expr* arg2, expr_ref& result);
 public:
     arith_rewriter(ast_manager & m, params_ref const & p = params_ref()):
         poly_rewriter<arith_rewriter_core>(m, p) {
@@ -118,7 +123,7 @@ public:
     br_status mk_app_core(func_decl * f, unsigned num_args, expr * const * args, expr_ref & result);
     void mk_app(func_decl * f, unsigned num_args, expr * const * args, expr_ref & result) {
         if (mk_app_core(f, num_args, args, result) == BR_FAILED)
-            result = m().mk_app(f, num_args, args);
+            result = m.mk_app(f, num_args, args);
     }
 
     br_status mk_eq_core(expr * arg1, expr * arg2, expr_ref & result);
@@ -147,38 +152,44 @@ public:
 
     br_status mk_abs_core(expr * arg, expr_ref & result);
 
+    br_status mk_and_core(unsigned n, expr* const* args, expr_ref& result);
+
     br_status mk_div_core(expr * arg1, expr * arg2, expr_ref & result);
     br_status mk_idiv_core(expr * arg1, expr * arg2, expr_ref & result);
     br_status mk_idivides(unsigned k, expr * arg, expr_ref & result);
     br_status mk_mod_core(expr * arg1, expr * arg2, expr_ref & result);
     br_status mk_rem_core(expr * arg1, expr * arg2, expr_ref & result);
     br_status mk_power_core(expr* arg1, expr* arg2, expr_ref & result);
+    br_status mk_band_core(unsigned sz, expr* arg1, expr* arg2, expr_ref& result);
+    br_status mk_shl_core(unsigned sz, expr* arg1, expr* arg2, expr_ref& result);
+    br_status mk_lshr_core(unsigned sz, expr* arg1, expr* arg2, expr_ref& result);
+    br_status mk_ashr_core(unsigned sz, expr* arg1, expr* arg2, expr_ref& result);
     void mk_div(expr * arg1, expr * arg2, expr_ref & result) {
         if (mk_div_core(arg1, arg2, result) == BR_FAILED)
-            result = m().mk_app(get_fid(), OP_DIV, arg1, arg2);
+            result = m.mk_app(get_fid(), OP_DIV, arg1, arg2);
     }
     void mk_idiv(expr * arg1, expr * arg2, expr_ref & result) {
         if (mk_idiv_core(arg1, arg2, result) == BR_FAILED)
-            result = m().mk_app(get_fid(), OP_IDIV, arg1, arg2);
+            result = m.mk_app(get_fid(), OP_IDIV, arg1, arg2);
     }
     void mk_mod(expr * arg1, expr * arg2, expr_ref & result) {
         if (mk_mod_core(arg1, arg2, result) == BR_FAILED)
-            result = m().mk_app(get_fid(), OP_MOD, arg1, arg2);
+            result = m.mk_app(get_fid(), OP_MOD, arg1, arg2);
     }
     void mk_rem(expr * arg1, expr * arg2, expr_ref & result) {
         if (mk_rem_core(arg1, arg2, result) == BR_FAILED)
-            result = m().mk_app(get_fid(), OP_REM, arg1, arg2);
+            result = m.mk_app(get_fid(), OP_REM, arg1, arg2);
     }
     
     br_status mk_to_int_core(expr * arg, expr_ref & result);
     br_status mk_to_real_core(expr * arg, expr_ref & result);
     void mk_to_int(expr * arg, expr_ref & result) { 
         if (mk_to_int_core(arg, result) == BR_FAILED)
-            result = m().mk_app(get_fid(), OP_TO_INT, 1, &arg); 
+            result = m.mk_app(get_fid(), OP_TO_INT, 1, &arg); 
     }
     void mk_to_real(expr * arg, expr_ref & result) { 
         if (mk_to_real_core(arg, result) == BR_FAILED)  
-            result = m().mk_app(get_fid(), OP_TO_REAL, 1, &arg); 
+            result = m.mk_app(get_fid(), OP_TO_REAL, 1, &arg); 
     }
     br_status mk_is_int(expr * arg, expr_ref & result);
 

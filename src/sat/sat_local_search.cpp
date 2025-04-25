@@ -353,22 +353,13 @@ namespace sat {
         DEBUG_CODE(verify_unsat_stack(););
     }
 
-    local_search::local_search() :         
-        m_is_unsat(false),
-        m_initializing(false),
-        m_par(nullptr) {
+    void local_search::reinit(solver& s, bool_vector const& phase) {
+        import(s, true);
+        for (unsigned i = phase.size(); i-- > 0; )
+            set_phase(i, phase[i]);
     }
 
-    void local_search::reinit(solver& s) {
-        import(s, true); 
-        if (s.m_best_phase_size > 0) {
-            for (unsigned i = num_vars(); i-- > 0; ) {
-                set_phase(i, s.m_best_phase[i]);
-            }
-        }
-    }
-
-    void local_search::import(solver const& s, bool _init) {        
+    void local_search::import(solver const& s, bool _init) {
         flet<bool> linit(m_initializing, true);
         m_is_pb = false;
         m_vars.reset();
@@ -378,11 +369,10 @@ namespace sat {
         m_vars.reserve(s.num_vars());
         m_config.set_config(s.get_config());
 
-        if (m_config.phase_sticky()) {
-            unsigned v = 0;
+        unsigned v = 0;
+        if (m_config.phase_sticky()) 
             for (var_info& vi : m_vars) 
-                vi.m_bias = s.m_phase[v++] ? 98 : 2;
-        }
+                vi.m_bias = s.m_phase[v++] ? 98 : 2;        
 
         // copy units
         unsigned trail_sz = s.init_trail_size();
@@ -419,17 +409,13 @@ namespace sat {
             [&](unsigned sz, literal const* c, unsigned k) { add_cardinality(sz, c, k); };
         std::function<void(unsigned sz, literal const* c, unsigned const* coeffs, unsigned k)> pb = 
             [&](unsigned sz, literal const* c, unsigned const* coeffs, unsigned k) { add_pb(sz, c, coeffs, k); };
-        if (ext && (!ext->is_pb() || !ext->extract_pb(card, pb)))
+        if (ext && (!ext->is_pb() || !ext->extract_pb(card, pb))) {
+            IF_VERBOSE(0, verbose_stream() << (ext) << " is-pb " << (!ext && ext->is_pb()) << "\n");
             throw default_exception("local search is incomplete with extensions beyond PB");
-        
-        if (_init) {
-            init();
         }
+        if (_init) 
+            init();        
     }
-    
-    local_search::~local_search() {
-    }
-    
 
     lbool local_search::check() {
         return check(0, nullptr, nullptr);
@@ -580,7 +566,6 @@ namespace sat {
         bool_var v = null_bool_var;
         unsigned num_unsat = m_unsat_stack.size();
         constraint const& c = m_constraints[m_unsat_stack[m_rand() % num_unsat]];
-        unsigned reflipped = 0;
         bool is_core = m_unsat_stack.size() <= 10;
         if (m_rand() % 10000 <= m_noise) {
             // take this branch with 98% probability.
@@ -684,7 +669,6 @@ namespace sat {
         }
 
         if (false && is_core && c.m_k < constraint_value(c)) {
-            ++reflipped;
             goto reflip;
         }
     }

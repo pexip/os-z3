@@ -35,7 +35,7 @@ private:
     _trail_stack m_stack;
 };
 
-template<typename Ctx = union_find_default_ctx, typename StackCtx = Ctx>
+template<typename Ctx = union_find_default_ctx>
 class union_find {
     Ctx &                         m_ctx;
     trail_stack &                 m_trail_stack;
@@ -91,6 +91,11 @@ public:
         m_next.push_back(r);
         m_trail_stack.push_ptr(&m_mk_var_trail);
         return r;
+    }
+
+    void reserve(unsigned v) {
+        while (get_num_vars() <= v)
+            mk_var();
     }
 
     unsigned get_num_vars() const { return m_find.size(); }
