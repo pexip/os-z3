@@ -52,6 +52,9 @@ namespace pb {
         constraint(tag_t t, unsigned id, literal l, unsigned sz, size_t osz, unsigned k): 
             m_tag(t), m_lit(l), m_size(sz), m_obj_size(osz), m_id(id), m_k(k) {
         }
+
+        virtual ~constraint() = default;
+
         sat::ext_constraint_idx cindex() const { return sat::constraint_base::mem2base(this); }
         void deallocate(small_object_allocator& a) { a.deallocate(obj_size(), sat::constraint_base::mem2base_ptr(this)); }
         unsigned id() const { return m_id; }
@@ -99,7 +102,7 @@ namespace pb {
         
         virtual bool is_watching(literal l) const { UNREACHABLE(); return false; };
         virtual literal_vector literals() const { UNREACHABLE(); return literal_vector(); }
-        virtual void swap(unsigned i, unsigned j) { UNREACHABLE(); }
+        virtual void swap(unsigned i, unsigned j) noexcept { UNREACHABLE(); }
         virtual literal get_lit(unsigned i) const { UNREACHABLE(); return sat::null_literal; }
         virtual void set_lit(unsigned i, literal l) { UNREACHABLE(); }
         virtual void negate() { UNREACHABLE(); }
@@ -122,7 +125,6 @@ namespace pb {
             iterator(constraint const& c, unsigned idx) : c(c), idx(idx) {}
             literal operator*() { return c.get_lit(idx); }
             iterator& operator++() { ++idx; return *this; }
-            bool operator==(iterator const& other) const { SASSERT(&c == &other.c); return idx == other.idx; }
             bool operator!=(iterator const& other) const { SASSERT(&c == &other.c); return idx != other.idx; }
         };
         

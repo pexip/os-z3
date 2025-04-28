@@ -238,7 +238,7 @@ interval & interval::operator=(interval const & other) {
     return *this;
 }
 
-interval & interval::operator=(interval && other) {
+interval & interval::operator=(interval && other) noexcept {
     SASSERT(&m_manager == &other.m_manager);
     m_lower = std::move(other.m_lower);
     m_upper = std::move(other.m_upper);
@@ -292,7 +292,7 @@ v_dependency * interval::join_opt(v_dependency * d1, v_dependency * d2, v_depend
 }
 
 interval & interval::operator*=(interval const & other) {
-#if Z3DEBUG || _TRACE
+#if defined(Z3DEBUG) || defined(_TRACE)
     bool contains_zero1 = contains_zero();
     bool contains_zero2 = other.contains_zero();
 #endif

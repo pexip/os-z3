@@ -21,6 +21,7 @@
 #include "ast/for_each_expr.h"
 #include "ast/rewriter/bv_rewriter.h"
 #include "ast/rewriter/bool_rewriter.h"
+#include <iostream>
 
 struct lackr_model_constructor::imp {
 public:
@@ -39,8 +40,6 @@ public:
         , m_empty_model(m)
         , m_ackr_helper(m)
     {}
-    
-    ~imp() { }
     
     //
     // Returns true iff model was successfully constructed.
@@ -186,7 +185,7 @@ private:
         return m_app2val.find(a, val);
     }
     
-    bool evaluate(app * const a, expr_ref& result) {
+    bool evaluate(app * a, expr_ref& result) {
         SASSERT(!is_val(a));
         const unsigned num = a->get_num_args();
         if (num == 0) { // handle constants
@@ -232,20 +231,20 @@ private:
     // Check and record the value for a given term, given that all arguments are already checked.
     //
     bool mk_value(app * a) {
-        if (is_val(a)) return true; // skip numerals
+        if (is_val(a))
+            return true; // skip numerals
         TRACE("model_constructor", tout << "mk_value(\n" << mk_ismt2_pp(a, m, 2) << ")\n";);
         SASSERT(!m_app2val.contains(a));
         expr_ref result(m);
-        if (!evaluate(a, result)) return false;
-        SASSERT(is_val(result));
+        if (!evaluate(a, result))
+            return false;
         TRACE("model_constructor",
               tout << "map term(\n" << mk_ismt2_pp(a, m, 2) << "\n->"
               << mk_ismt2_pp(result.get(), m, 2)<< ")\n"; );
         CTRACE("model_constructor",
                !is_val(result.get()),
-               tout << "eval fail\n" << mk_ismt2_pp(a, m, 2) << mk_ismt2_pp(result, m, 2) << "\n";
+               tout << "eval didn't create a constant \n" << mk_ismt2_pp(a, m, 2) << " " << mk_ismt2_pp(result, m, 2) << "\n";
                );
-        SASSERT(is_val(result.get()));
         m_app2val.insert(a, result.get()); // memoize
         m_pinned.push_back(a);
         m_pinned.push_back(result);

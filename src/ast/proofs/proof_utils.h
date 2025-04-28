@@ -106,7 +106,7 @@ public:
     {
         ast_manager &m = args.get_manager();
         bool_rewriter brwr(m);
-        brwr.set_flat(false);
+        brwr.set_flat_and_or(false);
 
         if (m.is_or(decl))
         { mk_or_core(args, res); }
@@ -230,7 +230,7 @@ public:
                    << "New pf: " << mk_pp(newp, m) << "\n";);
         }
 
-        proof *r;
+        proof *r = nullptr;
         VERIFY(cache.find(pr, r));
 
         DEBUG_CODE(

@@ -29,6 +29,7 @@ Notes:
 #include "util/ref_vector.h"
 #include "util/ref_buffer.h"
 #include "util/common_msgs.h"
+#include <iostream>
 
 #ifndef REALCLOSURE_INI_BUFFER_SIZE
 #define REALCLOSURE_INI_BUFFER_SIZE 32
@@ -134,7 +135,7 @@ namespace realclosure {
     typedef interval_manager<mpbq_config> mpbqi_manager;
     typedef mpbqi_manager::interval       mpbqi;
 
-    void swap(mpbqi & a, mpbqi & b) {
+    void swap(mpbqi & a, mpbqi & b) noexcept {
         swap(a.m_lower, b.m_lower);
         swap(a.m_upper, b.m_upper);
         std::swap(a.m_lower_inf, b.m_lower_inf);
@@ -409,8 +410,6 @@ namespace realclosure {
             sbuffer<unsigned>  m_szs;        // size of each polynomial in the sequence
         public:
             scoped_polynomial_seq(imp & m):m_seq_coeffs(m) {}
-            ~scoped_polynomial_seq() {
-            }
 
             /**
                \brief Add a new polynomial to the sequence.
@@ -505,8 +504,7 @@ namespace realclosure {
             m_bqim(lim, m_bqm),
             m_plus_inf_approx(m_bqm),
             m_minus_inf_approx(m_bqm) {
-            mpq one(1);
-            m_one = mk_rational(one);
+            m_one = mk_rational(mpq(1));
             inc_ref(m_one);
             m_pi = nullptr;
             m_e  = nullptr;
@@ -2499,13 +2497,42 @@ namespace realclosure {
         }
 
         /**
+           \brief Return true if a is an algebraic number.
+        */
+        bool is_algebraic(numeral const & a) {
+            return is_rational_function(a) && to_rational_function(a)->ext()->is_algebraic();
+        }
+
+        /**
+           \brief Return true if a represents an infinitesimal.
+        */
+        bool is_infinitesimal(numeral const & a) {
+            return is_rational_function(a) && to_rational_function(a)->ext()->is_infinitesimal();
+        }
+
+        /**
+           \brief Return true if a is a transcendental.
+        */
+        bool is_transcendental(numeral const & a) {
+            return is_rational_function(a) && to_rational_function(a)->ext()->is_transcendental();
+        }
+
+        /**
+           \brief Return true if a is a rational.
+        */
+        bool is_rational(numeral const & a) {
+            return a.m_value->is_rational();
+        }
+
+
+        /**
            \brief Return true if a depends on infinitesimal extensions.
         */
         bool depends_on_infinitesimals(numeral const & a) const {
             return depends_on_infinitesimals(a.m_value);
         }
 
-        static void swap(mpbqi & a, mpbqi & b) {
+        static void swap(mpbqi & a, mpbqi & b) noexcept {
             realclosure::swap(a, b);
         }
 
@@ -2556,13 +2583,10 @@ namespace realclosure {
             return new (allocator()) rational_value();
         }
 
-        /**
-           \brief Make a rational and swap its value with v
-        */
-        rational_value * mk_rational_and_swap(mpq & v) {
+        rational_value * mk_rational(mpq && v) {
             SASSERT(!qm().is_zero(v));
             rational_value * r = mk_rational();
-            ::swap(r->m_value, v);
+            r->m_value = std::move(v);
             return r;
         }
 
@@ -2584,7 +2608,7 @@ namespace realclosure {
             SASSERT(!bqm().is_zero(v));
             scoped_mpq v_q(qm()); // v as a rational
             ::to_mpq(qm(), v, v_q);
-            return mk_rational(v_q);
+            return mk_rational(std::move(v_q));
         }
 
         void reset_interval(value * a) {
@@ -3269,7 +3293,7 @@ namespace realclosure {
                             scoped_mpq num_z(qm());
                             qm().div(lcm_z, to_mpq(dens[i]), num_z);
                             SASSERT(qm().is_int(num_z));
-                            m = mk_rational_and_swap(num_z);
+                            m = mk_rational(std::move(num_z));
                             is_z = true;
                         }
                         bool found_lt_eq = false;
@@ -3332,6 +3356,151 @@ namespace realclosure {
             set(p, _p);
             set(q, _q);
         }
+
+        unsigned extension_index(numeral const & a) {
+            if (!is_rational_function(a))
+                return -1;
+            return to_rational_function(a)->ext()->idx();
+        }
+
+        symbol transcendental_name(numeral const & a) {
+            if (!is_transcendental(a))
+                return symbol();
+            return to_transcendental(to_rational_function(a)->ext())->m_name;
+        }
+
+        symbol infinitesimal_name(numeral const & a) {
+            if (!is_infinitesimal(a))
+                return symbol();
+            return to_infinitesimal(to_rational_function(a)->ext())->m_name;
+        }
+
+        unsigned num_coefficients(numeral const & a) {
+            if (!is_algebraic(a))
+                return 0;
+            return to_algebraic(to_rational_function(a)->ext())->p().size();
+        }
+
+        numeral get_coefficient(numeral const & a, unsigned i)
+        {
+            if (!is_algebraic(a))
+                return numeral();
+            algebraic * ext = to_algebraic(to_rational_function(a)->ext());
+            if (i >= ext->p().size())
+                return numeral();
+            value_ref v(*this);
+            v = ext->p()[i];
+            numeral r;
+            set(r, v);
+            return r;
+        }
+
+        unsigned num_sign_conditions(numeral const & a) {
+            unsigned r = 0;
+            if (is_algebraic(a)) {
+                algebraic * ext = to_algebraic(to_rational_function(a)->ext());
+                const sign_det * sdt = ext->sdt();
+                if (sdt) {
+                    sign_condition * sc = sdt->sc(ext->sc_idx());
+                    while (sc) {
+                        r++;
+                        sc = sc->prev();
+                    }
+                }
+            }
+            return r;
+        }
+
+        int get_sign_condition_sign(numeral const & a, unsigned i)
+        {
+            if (!is_algebraic(a))
+                return 0;
+            algebraic * ext = to_algebraic(to_rational_function(a)->ext());
+            const sign_det * sdt = ext->sdt();
+            if (!sdt)
+                return 0;
+            else {
+                sign_condition * sc = sdt->sc(ext->sc_idx());
+                while (i) {
+                    if (sc) sc = sc->prev();
+                    i--;
+                }
+                return sc ? sc->sign() : 0;
+            }
+        }
+
+        bool get_interval(numeral const & a, int & lower_is_inf, int & lower_is_open, numeral & lower, int & upper_is_inf, int & upper_is_open, numeral & upper)
+        {
+            if (!is_algebraic(a))
+                return false;
+            lower = numeral();
+            upper = numeral();
+            algebraic * ext = to_algebraic(to_rational_function(a)->ext());
+            mpbqi &ivl = ext->iso_interval();
+            lower_is_inf = ivl.lower_is_inf();
+            lower_is_open = ivl.lower_is_open();
+            if (!m_bqm.is_zero(ivl.lower()))
+                set(lower, mk_rational(ivl.lower()));
+            upper_is_inf = ivl.upper_is_inf();
+            upper_is_open = ivl.upper_is_open();
+            if (!m_bqm.is_zero(ivl.upper()))
+                set(upper, mk_rational(ivl.upper()));
+            return true;
+        }
+
+        unsigned get_sign_condition_size(numeral const &a, unsigned i) {
+            algebraic * ext = to_algebraic(to_rational_function(a)->ext());
+            const sign_det * sdt = ext->sdt();
+            if (!sdt)
+                return 0;
+            sign_condition * sc = sdt->sc(ext->sc_idx());
+            while (i) {
+                if (sc) sc = sc->prev();
+                i--;
+            }
+            return ext->sdt()->qs()[sc->qidx()].size();
+        }
+
+        int num_sign_condition_coefficients(numeral const &a, unsigned i)
+        {
+            if (!is_algebraic(a))
+                return 0;
+            algebraic * ext = to_algebraic(to_rational_function(a)->ext());
+            const sign_det * sdt = ext->sdt();
+            if (!sdt)
+                return 0;
+            sign_condition * sc = sdt->sc(ext->sc_idx());
+            while (i) {
+                if (sc) sc = sc->prev();
+                i--;
+            }
+            const polynomial & q = ext->sdt()->qs()[sc->qidx()];
+            return q.size();
+        }
+
+        numeral get_sign_condition_coefficient(numeral const &a, unsigned i, unsigned j)
+        {
+            if (!is_algebraic(a))
+                return numeral();
+            algebraic * ext = to_algebraic(to_rational_function(a)->ext());
+            const sign_det * sdt = ext->sdt();
+            if (!sdt)
+                return numeral();
+            sign_condition * sc = sdt->sc(ext->sc_idx());
+            while (i) {
+                if (sc) sc = sc->prev();
+                i--;
+            }
+            const polynomial & q = ext->sdt()->qs()[sc->qidx()];
+            if (j >= q.size())
+                return numeral();
+            value_ref v(*this);
+            v = q[j];
+            numeral r;
+            set(r, v);
+            return r;
+        }
+
 
         // ---------------------------------
         //
@@ -3431,7 +3600,7 @@ namespace realclosure {
                 scoped_mpq r(qm());
                 SASSERT(qm().is_int(to_mpq(a)));
                 qm().div(to_mpq(a), b, r);
-                a = mk_rational_and_swap(r);
+                a = mk_rational(std::move(r));
             }
             else {
                 rational_function_value * rf = to_rational_function(a);
@@ -3591,9 +3760,8 @@ namespace realclosure {
             r.reset();
             if (sz > 1) {
                 for (unsigned i = 1; i < sz; i++) {
-                    mpq i_mpq(i);
                     value_ref a_i(*this);
-                    a_i = mk_rational_and_swap(i_mpq);
+                    a_i = mk_rational(mpq(i));
                     mul(a_i, p[i], a_i);
                     r.push_back(a_i);
                 }
@@ -3820,7 +3988,7 @@ namespace realclosure {
             scoped_mpz mpz_twok(qm());
             qm().mul2k(mpz(1), b.k(), mpz_twok);
             value_ref twok(*this), twok_i(*this);
-            twok = mk_rational(mpz_twok);
+            twok = mk_rational(std::move(mpz_twok));
             twok_i = twok;
             value_ref c(*this);
             c = mk_rational(b.numerator());
@@ -5060,7 +5228,7 @@ namespace realclosure {
                 if (qm().is_zero(v))
                     r = nullptr;
                 else
-                    r = mk_rational_and_swap(v);
+                    r = mk_rational(std::move(v));
             }
             else {
                 INC_DEPTH();
@@ -5089,7 +5257,7 @@ namespace realclosure {
                 if (qm().is_zero(v))
                     r = nullptr;
                 else
-                    r = mk_rational_and_swap(v);
+                    r = mk_rational(std::move(v));
             }
             else {
                 value_ref neg_b(*this);
@@ -5123,7 +5291,7 @@ namespace realclosure {
                 scoped_mpq v(qm());
                 qm().set(v, to_mpq(a));
                 qm().neg(v);
-                r = mk_rational_and_swap(v);
+                r = mk_rational(std::move(v));
             }
             else {
                 neg_rf(to_rational_function(a), r);
@@ -5268,7 +5436,7 @@ namespace realclosure {
             else if (is_nz_rational(a) && is_nz_rational(b)) {
                 scoped_mpq v(qm());
                 qm().mul(to_mpq(a), to_mpq(b), v);
-                r = mk_rational_and_swap(v);
+                r = mk_rational(std::move(v));
             }
             else {
                 INC_DEPTH();
@@ -5303,7 +5471,7 @@ namespace realclosure {
             else if (is_nz_rational(a) && is_nz_rational(b)) {
                 scoped_mpq v(qm());
                 qm().div(to_mpq(a), to_mpq(b), v);
-                r = mk_rational_and_swap(v);
+                r = mk_rational(std::move(v));
             }
             else {
                 value_ref inv_b(*this);
@@ -5556,7 +5724,7 @@ namespace realclosure {
             if (is_nz_rational(a)) {
                 scoped_mpq v(qm());
                 qm().inv(to_mpq(a), v);
-                r = mk_rational_and_swap(v);
+                r = mk_rational(std::move(v));
             }
             else {
                 inv_rf(to_rational_function(a), r);
@@ -6107,6 +6275,22 @@ namespace realclosure {
         return m_imp->is_int(a);
     }
 
+    bool manager::is_rational(numeral const & a) {
+        return m_imp->is_rational(a);
+    }
+
+    bool manager::is_algebraic(numeral const & a) {
+        return m_imp->is_algebraic(a);
+    }
+
+    bool manager::is_infinitesimal(numeral const & a) {
+        return m_imp->is_infinitesimal(a);
+    }
+
+    bool manager::is_transcendental(numeral const & a) {
+        return m_imp->is_transcendental(a);
+    }
+
     bool manager::depends_on_infinitesimals(numeral const & a) {
         return m_imp->depends_on_infinitesimals(a);
     }
@@ -6127,7 +6311,7 @@ namespace realclosure {
         m_imp->set(a, n);
     }
 
-    void manager::swap(numeral & a, numeral & b) {
+    void manager::swap(numeral & a, numeral & b) noexcept {
         std::swap(a.m_value, b.m_value);
     }
 
@@ -6254,6 +6438,56 @@ namespace realclosure {
     void manager::clean_denominators(numeral const & a, numeral & p, numeral & q) {
         save_interval_ctx ctx(this);
         m_imp->clean_denominators(a, p, q);
+    }
+
+    unsigned manager::extension_index(numeral const & a)
+    {
+        return m_imp->extension_index(a);
+    }
+
+    symbol manager::transcendental_name(numeral const &a)
+    {
+        return m_imp->transcendental_name(a);
+    }
+
+    symbol manager::infinitesimal_name(numeral const &a)
+    {
+        return m_imp->infinitesimal_name(a);
+    }
+
+    unsigned manager::num_coefficients(numeral const &a)
+    {
+        return m_imp->num_coefficients(a);
+    }
+
+    manager::numeral manager::get_coefficient(numeral const &a, unsigned i)
+    {
+        return m_imp->get_coefficient(a, i);
+    }
+
+    unsigned manager::num_sign_conditions(numeral const &a)
+    {
+        return m_imp->num_sign_conditions(a);
+    }
+
+    int manager::get_sign_condition_sign(numeral const &a, unsigned i)
+    {
+        return m_imp->get_sign_condition_sign(a, i);
+    }
+
+    bool manager::get_interval(numeral const & a, int & lower_is_inf, int & lower_is_open, numeral & lower, int & upper_is_inf, int & upper_is_open, numeral & upper)
+    {
+        return m_imp->get_interval(a, lower_is_inf, lower_is_open, lower, upper_is_inf, upper_is_open, upper);
+    }
+
+    unsigned manager::num_sign_condition_coefficients(numeral const &a, unsigned i)
+    {
+        return m_imp->num_sign_condition_coefficients(a, i);
+    }
+
+    manager::numeral manager::get_sign_condition_coefficient(numeral const &a, unsigned i, unsigned j)
+    {
+        return m_imp->get_sign_condition_coefficient(a, i, j);
     }
 };
 

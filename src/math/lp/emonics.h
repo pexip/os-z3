@@ -51,9 +51,8 @@ class emonics {
         unsigned     m_index;
     };
     struct head_tail {
-        head_tail(): m_head(nullptr), m_tail(nullptr) {}
-        cell* m_head;
-        cell* m_tail;
+        cell* m_head = nullptr;
+        cell* m_tail = nullptr;
     };
     struct hash_canonical {
         emonics& em;
@@ -81,20 +80,20 @@ class emonics {
         }
     };
     
-    union_find<emonics>          m_u_f;
     trail_stack                  m_u_f_stack;
+    union_find<emonics>          m_u_f;
     mutable svector<lpvar>       m_find_key; // the key used when looking for a monic with the specific variables
     var_eqs<emonics>&            m_ve;
     mutable vector<monic>        m_monics;     // set of monics
     mutable unsigned_vector      m_var2index;     // var_mIndex -> mIndex
-    unsigned_vector              m_lim;           // backtracking point
     mutable unsigned             m_visited;       // timestamp of visited monics during pf_iterator
-    region                       m_region;        // region for allocating linked lists
     mutable svector<head_tail>   m_use_lists;     // use list of monics where variables occur.
     hash_canonical               m_cg_hash;
     eq_canonical                 m_cg_eq;
     map<lpvar, unsigned_vector, hash_canonical, eq_canonical> m_cg_table; // congruence (canonical) table.
 
+
+    void pop_monic();
 
     void inc_visited() const;
 
@@ -115,6 +114,8 @@ class emonics {
     std::ostream& display_use(std::ostream& out) const; 
     std::ostream& display_uf(std::ostream& out) const; 
     std::ostream& display(std::ostream& out, cell* c) const;
+
+
 public:
     unsigned number_of_monics() const { return m_monics.size(); }
     /**
@@ -123,8 +124,8 @@ public:
        other calls to push/pop to the var_eqs should take place. 
     */
     emonics(var_eqs<emonics>& ve):
-        m_u_f(*this),
         m_u_f_stack(),
+        m_u_f(*this),
         m_ve(ve), 
         m_visited(0), 
         m_cg_hash(*this),
@@ -139,6 +140,9 @@ public:
     
     void merge_eh(unsigned r2, unsigned r1, unsigned v2, unsigned v1) {}
     void after_merge_eh(unsigned r2, unsigned r1, unsigned v2, unsigned v1) {}
+
+    void set_propagated(monic const& m);
+    void set_bound_propagated(monic const& m);
 
     // this method is required by union_find
     trail_stack & get_trail_stack() { return m_u_f_stack; }
@@ -200,7 +204,6 @@ public:
         monic & operator*() { return m.m_monics[m_cell->m_index]; }
         iterator& operator++() { m_touched = true; m_cell = m_cell->m_next; return *this; }
         iterator operator++(int) { iterator tmp = *this; ++*this; return tmp; }
-        bool operator==(iterator const& other) const { return m_cell == other.m_cell && m_touched == other.m_touched; }
         bool operator!=(iterator const& other) const { return m_cell != other.m_cell || m_touched != other.m_touched; }
     };
         
@@ -234,7 +237,6 @@ public:
         }
         pf_iterator& operator++() { ++m_it; fast_forward(); return *this; }
         pf_iterator operator++(int) { pf_iterator tmp = *this; ++*this; return tmp; }
-        bool operator==(pf_iterator const& other) const { return m_it == other.m_it; }
         bool operator!=(pf_iterator const& other) const { return m_it != other.m_it; }
     };
 

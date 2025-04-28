@@ -47,9 +47,6 @@ void fpa_decl_plugin::set_manager(ast_manager * m, family_id id) {
     m_bv_plugin = static_cast<bv_decl_plugin*>(m_manager->get_plugin(m_bv_fid));
 }
 
-fpa_decl_plugin::~fpa_decl_plugin() {
-}
-
 unsigned fpa_decl_plugin::mk_id(mpf const & v) {
     unsigned new_id = m_id_gen.mk();
     m_values.reserve(new_id+1);
@@ -207,9 +204,8 @@ sort * fpa_decl_plugin::mk_float_sort(unsigned ebits, unsigned sbits) {
         m_manager->raise_exception("minimum number of exponent bits is 2");
     if (ebits > 63)
         m_manager->raise_exception("maximum number of exponent bits is 63");
-    
-    parameter p1(ebits), p2(sbits);
-    parameter ps[2] = { p1, p2 };
+
+    parameter ps[2] = { parameter(ebits), parameter(sbits) };
     sort_size sz;
     sz = sort_size::mk_very_big(); // TODO: refine
     return m_manager->mk_sort(symbol("FloatingPoint"), sort_info(m_family_id, FLOATING_POINT_SORT, sz, 2, ps));
@@ -375,6 +371,8 @@ func_decl * fpa_decl_plugin::mk_binary_decl(decl_kind k, unsigned num_parameters
     case OP_FPA_REM: name = "fp.rem"; break;
     case OP_FPA_MIN: name = "fp.min"; break;
     case OP_FPA_MAX: name = "fp.max"; break;
+    case OP_FPA_MIN_I: name = "fp.min_i"; break;
+    case OP_FPA_MAX_I: name = "fp.max_i"; break;
     default:
         UNREACHABLE();
         break;
@@ -756,6 +754,8 @@ func_decl * fpa_decl_plugin::mk_func_decl(decl_kind k, unsigned num_parameters, 
     case OP_FPA_REM:
     case OP_FPA_MIN:
     case OP_FPA_MAX:
+    case OP_FPA_MIN_I:
+    case OP_FPA_MAX_I:
         return mk_binary_decl(k, num_parameters, parameters, arity, domain, range);
     case OP_FPA_ADD:
     case OP_FPA_MUL:
@@ -774,16 +774,20 @@ func_decl * fpa_decl_plugin::mk_func_decl(decl_kind k, unsigned num_parameters, 
     case OP_FPA_FP:
         return mk_fp(k, num_parameters, parameters, arity, domain, range);
     case OP_FPA_TO_UBV:
+    case OP_FPA_TO_UBV_I:
         return mk_to_ubv(k, num_parameters, parameters, arity, domain, range);
     case OP_FPA_TO_SBV:
+    case OP_FPA_TO_SBV_I:
         return mk_to_sbv(k, num_parameters, parameters, arity, domain, range);
     case OP_FPA_TO_REAL:
+    case OP_FPA_TO_REAL_I:
         return mk_to_real(k, num_parameters, parameters, arity, domain, range);
     case OP_FPA_TO_FP:
         return mk_to_fp(k, num_parameters, parameters, arity, domain, range);
     case OP_FPA_TO_FP_UNSIGNED:
         return mk_to_fp_unsigned(k, num_parameters, parameters, arity, domain, range);
     case OP_FPA_TO_IEEE_BV:
+    case OP_FPA_TO_IEEE_BV_I:
         return mk_to_ieee_bv(k, num_parameters, parameters, arity, domain, range);
 
     case OP_FPA_BVWRAP:
@@ -829,6 +833,8 @@ void fpa_decl_plugin::get_op_names(svector<builtin_name> & op_names, symbol cons
     op_names.push_back(builtin_name("fp.roundToIntegral", OP_FPA_ROUND_TO_INTEGRAL));
     op_names.push_back(builtin_name("fp.min", OP_FPA_MIN));
     op_names.push_back(builtin_name("fp.max", OP_FPA_MAX));
+    op_names.push_back(builtin_name("fp.min_i", OP_FPA_MIN_I));
+    op_names.push_back(builtin_name("fp.max_i", OP_FPA_MAX_I));
     op_names.push_back(builtin_name("fp.leq", OP_FPA_LE));
     op_names.push_back(builtin_name("fp.lt",  OP_FPA_LT));
     op_names.push_back(builtin_name("fp.geq", OP_FPA_GE));
@@ -846,7 +852,10 @@ void fpa_decl_plugin::get_op_names(svector<builtin_name> & op_names, symbol cons
     op_names.push_back(builtin_name("fp", OP_FPA_FP));
     op_names.push_back(builtin_name("fp.to_ubv", OP_FPA_TO_UBV));
     op_names.push_back(builtin_name("fp.to_sbv", OP_FPA_TO_SBV));
+    op_names.push_back(builtin_name("fp.to_ubv_I", OP_FPA_TO_UBV_I));
+    op_names.push_back(builtin_name("fp.to_sbv_I", OP_FPA_TO_SBV_I));
     op_names.push_back(builtin_name("fp.to_real", OP_FPA_TO_REAL));
+    op_names.push_back(builtin_name("fp.to_real_I", OP_FPA_TO_REAL_I));
 
     op_names.push_back(builtin_name("to_fp", OP_FPA_TO_FP));
     op_names.push_back(builtin_name("to_fp_unsigned", OP_FPA_TO_FP_UNSIGNED));
@@ -854,6 +863,7 @@ void fpa_decl_plugin::get_op_names(svector<builtin_name> & op_names, symbol cons
     /* Extensions */
     op_names.push_back(builtin_name("to_ieee_bv", OP_FPA_TO_IEEE_BV));
     op_names.push_back(builtin_name("fp.to_ieee_bv", OP_FPA_TO_IEEE_BV));
+    op_names.push_back(builtin_name("fp.to_ieee_bv_I", OP_FPA_TO_IEEE_BV_I));
 }
 
 void fpa_decl_plugin::get_sort_names(svector<builtin_name> & sort_names, symbol const & logic) {
@@ -919,17 +929,22 @@ bool fpa_decl_plugin::is_unique_value(app* e) const {
     case OP_FPA_RM_TOWARD_NEGATIVE:
     case OP_FPA_RM_TOWARD_ZERO:
         return true;
-    case OP_FPA_PLUS_INF:  /* No; +oo == fp(#b0 #b11 #b00) */
-    case OP_FPA_MINUS_INF: /* No; -oo == fp #b1 #b11 #b00) */
-    case OP_FPA_PLUS_ZERO: /* No; +zero == fp #b0 #b00 #b000) */
-    case OP_FPA_MINUS_ZERO: /* No; -zero == fp #b1 #b00 #b000) */
+    case OP_FPA_PLUS_INF:  /* No; +oo == (fp #b0 #b11 #b00) */
+    case OP_FPA_MINUS_INF: /* No; -oo == (fp #b1 #b11 #b00) */
+    case OP_FPA_PLUS_ZERO: /* No; +zero == (fp #b0 #b00 #b000) */
+    case OP_FPA_MINUS_ZERO: /* No; -zero == (fp #b1 #b00 #b000) */
     case OP_FPA_NAN: /* No; NaN == (fp #b0 #b111111 #b0000001) */
     case OP_FPA_NUM: /* see NaN */
         return false;
-    case OP_FPA_FP:
-        return m_manager->is_unique_value(e->get_arg(0)) &&
-            m_manager->is_unique_value(e->get_arg(1)) &&
-            m_manager->is_unique_value(e->get_arg(2));
+    case OP_FPA_FP: {
+        if (m_manager->is_value(e->get_arg(0)) &&
+            m_manager->is_value(e->get_arg(1)) &&
+            m_manager->is_value(e->get_arg(2))) {
+          bv_util bu(*m_manager);
+          return !bu.is_allone(e->get_arg(1)) && !bu.is_zero(e->get_arg(1));
+        }
+        return false;
+    }
     default:
         return false;
     }
@@ -941,9 +956,6 @@ fpa_util::fpa_util(ast_manager & m):
     m_a_util(m),
     m_bv_util(m) {
     m_plugin = static_cast<fpa_decl_plugin*>(m.get_plugin(m_fid));
-}
-
-fpa_util::~fpa_util() {
 }
 
 sort * fpa_util::mk_float_sort(unsigned ebits, unsigned sbits) {
@@ -1059,16 +1071,19 @@ bool fpa_util::is_considered_uninterpreted(func_decl * f, unsigned n, expr* cons
     if (f->get_family_id() != ffid)
         return false;
 
-    if (is_decl_of(f, ffid, OP_FPA_TO_IEEE_BV)) {
+    if (is_decl_of(f, ffid, OP_FPA_TO_IEEE_BV) ||
+        is_decl_of(f, ffid, OP_FPA_TO_IEEE_BV_I)) {
         SASSERT(n == 1);
         expr* x = args[0];
         return is_nan(x);
     }
     else if (is_decl_of(f, ffid, OP_FPA_TO_SBV) ||
-             is_decl_of(f, ffid, OP_FPA_TO_UBV)) {
+             is_decl_of(f, ffid, OP_FPA_TO_UBV) ||
+             is_decl_of(f, ffid, OP_FPA_TO_SBV_I) ||
+             is_decl_of(f, ffid, OP_FPA_TO_UBV_I)) {
         SASSERT(n == 2);
         SASSERT(f->get_num_parameters() == 1);
-        bool is_signed = f->get_decl_kind() == OP_FPA_TO_SBV;
+        bool is_signed = f->get_decl_kind() == OP_FPA_TO_SBV || f->get_decl_kind() == OP_FPA_TO_SBV_I;
         expr* rm = args[0];
         expr* x = args[1];
         unsigned bv_sz = f->get_parameter(0).get_int();
@@ -1084,7 +1099,8 @@ bool fpa_util::is_considered_uninterpreted(func_decl * f, unsigned n, expr* cons
         else
             return mpqm.is_neg(r) || mpqm.bitsize(r) > bv_sz;
     }
-    else if (is_decl_of(f, ffid, OP_FPA_TO_REAL)) {
+    else if (is_decl_of(f, ffid, OP_FPA_TO_REAL) ||
+             is_decl_of(f, ffid, OP_FPA_TO_REAL_I)) {
         SASSERT(n == 1);
         expr* x = args[0];
         return is_nan(x) || is_inf(x);

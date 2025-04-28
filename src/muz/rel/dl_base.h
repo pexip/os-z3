@@ -73,7 +73,7 @@ namespace datalog {
 
 
     /**
-       Termplate class containing common infrastructure for relations and tables
+       Template class containing common infrastructure for relations and tables
     */
     template<class Traits>
     struct tr_infrastructure {
@@ -93,7 +93,7 @@ namespace datalog {
         */
         class signature_base : public signature_base_base {
         public:
-            bool operator==(const signature & o) const {
+            bool operator==(const signature_base & o) const {
                 unsigned n=signature_base_base::size();
                 if (n!=o.size()) {
                     return false;
@@ -160,7 +160,7 @@ namespace datalog {
                 SASSERT(cycle_len>=2);
                 result=src;
 
-                permutate_by_cycle(result, cycle_len, permutation_cycle);
+                permute_by_cycle(result, cycle_len, permutation_cycle);
             }
 
             /**
@@ -179,11 +179,10 @@ namespace datalog {
         class base_fn {
         public:
             base_fn() = default;
-            virtual ~base_fn() {}
-        private:
-            //private and undefined copy constructor and operator= to avoid copying
-            base_fn(const base_fn &);
-            base_fn& operator=(const base_fn &);
+            virtual ~base_fn() = default;
+
+            base_fn(const base_fn &) = delete;
+            base_fn& operator=(const base_fn &) = delete;
         };
 
         class join_fn : public base_fn {
@@ -261,7 +260,7 @@ namespace datalog {
             */
             bool check_kind(base_object const& r) const { return &r.get_plugin()==this; }
         public:
-            virtual ~plugin_object() {}
+            virtual ~plugin_object() = default;
 
             virtual void initialize(family_id fid) { m_kind = fid; }
 
@@ -424,7 +423,7 @@ namespace datalog {
             }
 #endif
 
-            virtual ~base_ancestor() {}
+            virtual ~base_ancestor() = default;
 
             void set_kind(family_id kind) { SASSERT(kind>=0); m_kind = kind; }
 
@@ -485,7 +484,7 @@ namespace datalog {
 
             virtual bool can_swap(const base_object & o) const { return false; }
 
-            virtual void swap(base_object & o) {
+            virtual void swap(base_object & o) noexcept {
                 std::swap(m_kind, o.m_kind);
 #if DL_LEAK_HUNTING
                 m_leak_guard = get_plugin().get_ast_manager().mk_fresh_sort(get_plugin().get_name().bare_str());
@@ -799,7 +798,6 @@ namespace datalog {
     protected:
         relation_base(relation_plugin & plugin, const relation_signature & s)
             : base_ancestor(plugin, s) {}
-        ~relation_base() override {}
     public:
         virtual relation_base * complement(func_decl* p) const = 0;
 
@@ -867,7 +865,7 @@ namespace datalog {
 
     class table_row_mutator_fn {
     public:
-        virtual ~table_row_mutator_fn() {}
+        virtual ~table_row_mutator_fn() = default;
         /**
             \brief The function is called for a particular table row. The \c func_columns contains
             a pointer to an array of functional column values that can be modified. If the function
@@ -881,9 +879,9 @@ namespace datalog {
 
     class table_row_pair_reduce_fn {
     public:
-        virtual ~table_row_pair_reduce_fn() {}
+        virtual ~table_row_pair_reduce_fn() = default;
         /**
-            \brief The function is called for pair of table rows that became duplicit due to projection.
+            \brief The function is called for pair of table rows that became duplicated due to projection.
             The values that are in the first array after return from the function will be used for the
             resulting row.
 
@@ -912,7 +910,7 @@ namespace datalog {
     public:
         table_signature() : m_functional_columns(0) {}
 
-        void swap(table_signature & s) {
+        void swap(table_signature & s) noexcept {
             signature_base::swap(s);
             std::swap(m_functional_columns, s.m_functional_columns);
         }
@@ -1040,7 +1038,6 @@ namespace datalog {
     protected:
         table_base(table_plugin & plugin, const table_signature & s)
             : base_ancestor(plugin, s) {}
-        ~table_base() override {}
     public:
         table_base * clone() const override;
         virtual table_base * complement(func_decl* p, const table_element * func_columns = nullptr) const;
@@ -1098,7 +1095,10 @@ namespace datalog {
             unsigned m_ref_cnt;
         public:
             iterator_core() : m_ref_cnt(0) {}
-            virtual ~iterator_core() {}
+            virtual ~iterator_core() = default;
+
+            iterator_core(const iterator_core &) = delete;
+            iterator_core & operator=(const iterator_core &) = delete;
 
             void inc_ref() { m_ref_cnt++; }
             void dec_ref() {
@@ -1113,22 +1113,21 @@ namespace datalog {
 
             virtual row_interface & operator*() = 0;
             virtual void operator++() = 0;
-            virtual bool operator==(const iterator_core & it) {
+            virtual bool operator==(const iterator_core & it) const {
                 //we worry about the equality operator only because of checking
                 //the equality with the end() iterator
                 return is_finished() && it.is_finished();
             }
-        private:
-            //private and undefined copy constructor and assignment operator
-            iterator_core(const iterator_core &);
-            iterator_core & operator=(const iterator_core &);
         };
 
         struct row_iterator_core {
             unsigned m_ref_cnt;
         public:
             row_iterator_core() : m_ref_cnt(0) {}
-            virtual ~row_iterator_core() {}
+            virtual ~row_iterator_core() = default;
+
+            row_iterator_core(const row_iterator_core &) = delete;
+            row_iterator_core & operator=(const row_iterator_core &) = delete;
 
             void inc_ref() { m_ref_cnt++; }
             void dec_ref() {
@@ -1143,15 +1142,11 @@ namespace datalog {
 
             virtual table_element operator*() = 0;
             virtual void operator++() = 0;
-            virtual bool operator==(const row_iterator_core & it) {
+            virtual bool operator==(const row_iterator_core & it) const {
                 //we worry about the equality operator only because of checking
                 //the equality with the end() iterator
                 return is_finished() && it.is_finished();
             }
-        private:
-            //private and undefined copy constructor and assignment operator
-            row_iterator_core(const row_iterator_core &);
-            row_iterator_core & operator=(const row_iterator_core &);
         };
 
     public:
@@ -1174,10 +1169,8 @@ namespace datalog {
             { return &(*(*m_core)); }
             iterator & operator++()
             { ++(*m_core); return *this; }
-            bool operator==(const iterator & it)
-            { return (*m_core)==(*it.m_core); }
-            bool operator!=(const iterator & it)
-            { return !operator==(it); }
+            bool operator==(const iterator & it) const  { return (*m_core)==(*it.m_core); }
+            bool operator!=(const iterator & it) const  { return !operator==(it); }
         };
 
         class row_iterator {
@@ -1192,10 +1185,8 @@ namespace datalog {
             { return *(*m_core); }
             row_iterator & operator++()
             { ++(*m_core); return *this; }
-            bool operator==(const row_iterator & it)
-            { return (*m_core)==(*it.m_core); }
-            bool operator!=(const row_iterator & it)
-            { return !operator==(it); }
+            bool operator==(const row_iterator & it) const  { return (*m_core)==(*it.m_core); }
+            bool operator!=(const row_iterator & it) const  { return !operator==(it); }
         };
 
         virtual iterator begin() const = 0;
@@ -1210,7 +1201,7 @@ namespace datalog {
             typedef row_iterator const_iterator;
 
             row_interface(const table_base & parent_table) : m_parent_table(parent_table) {}
-            virtual ~row_interface() {}
+            virtual ~row_interface() = default;
 
             virtual table_element operator[](unsigned col) const = 0;
 

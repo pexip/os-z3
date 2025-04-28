@@ -3,9 +3,11 @@ Author: Fabian Wolff <fabi.wolff@arcor.de>
 Last-Update: 2020-01-08
 ---
 This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
---- a/src/CMakeLists.txt
-+++ b/src/CMakeLists.txt
-@@ -126,8 +126,8 @@
+Index: z3/src/CMakeLists.txt
+===================================================================
+--- z3.orig/src/CMakeLists.txt
++++ z3/src/CMakeLists.txt
+@@ -151,8 +151,8 @@ set_target_properties(libz3 PROPERTIES
    # libz3.so.W.X.
    # This indicates that no breaking API changes will be made within a single
    # minor version.
@@ -16,9 +18,11 @@ This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
  
  if (NOT MSVC)
    # On UNIX like platforms if we don't change the OUTPUT_NAME
---- a/src/api/java/CMakeLists.txt
-+++ b/src/api/java/CMakeLists.txt
-@@ -52,6 +52,7 @@
+Index: z3/src/api/java/CMakeLists.txt
+===================================================================
+--- z3.orig/src/api/java/CMakeLists.txt
++++ z3/src/api/java/CMakeLists.txt
+@@ -52,6 +52,7 @@ target_include_directories(z3java PRIVAT
  
  # This prevents CMake from automatically defining ``z3java_EXPORTS``
  set_property(TARGET z3java PROPERTY DEFINE_SYMBOL "")
@@ -26,12 +30,12 @@ This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
  
  # Rule to generate the ``com.microsoft.z3.enumerations`` package
  # FIXME: This list of files is fragile
-@@ -223,7 +224,7 @@
-   )
-   # FIXME: I don't think this the right installation location
-   set(Z3_JAVA_JNI_LIB_INSTALLDIR
--    "${CMAKE_INSTALL_LIBDIR}"
-+    "${CMAKE_INSTALL_LIBDIR}/jni"
-     CACHE
-     PATH
-     "Directory to install Z3 Java JNI bridge library relative to install prefix"
+@@ -212,7 +213,7 @@ if (Z3_INSTALL_JAVA_BINDINGS)
+   endif()
+   if (NOT Z3_JAVA_JNI_LIB_INSTALLDIR)
+     set(Z3_JAVA_JNI_LIB_INSTALLDIR
+-       "${CMAKE_INSTALL_LIBDIR}"
++       "${CMAKE_INSTALL_LIBDIR}/jni"
+        CACHE
+        PATH
+        "Directory to install Z3 Java JNI bridge library relative to install prefix"

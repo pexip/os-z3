@@ -18,12 +18,12 @@ Notes:
 #pragma once
 
 #include "ast/ast.h"
+#include "tactic/probe.h"
 #include "util/params.h"
 #include "util/cmd_context_types.h"
 #include "util/ref.h"
 
 class tactic;
-class probe;
 
 typedef tactic* (*tactic_factory)(ast_manager&, const params_ref&);
 
@@ -44,6 +44,7 @@ public:
 
 void install_core_tactic_cmds(cmd_context & ctx);
 tactic * sexpr2tactic(cmd_context & ctx, sexpr * n);
+params_ref sexpr2params(cmd_context& ctx, sexpr * n, param_descrs const& descr);
 
 class probe_info {
     symbol           m_name;
@@ -51,7 +52,6 @@ class probe_info {
     ref<probe>       m_probe;
 public:
     probe_info(symbol const & n, char const * d, probe * p);
-    ~probe_info();
 
     symbol get_name() const { return m_name; }
     char const * get_descr() const { return m_descr; }

@@ -58,8 +58,6 @@ namespace datalog {
             m_inner_ctx.updt_params(params);
     }
 
-    mk_karr_invariants::~mk_karr_invariants() { }
-
     void matrix::display_row(
         std::ostream& out, vector<rational> const& row, rational const& b, bool is_eq) {
         for (unsigned j = 0; j < row.size(); ++j) {
@@ -104,8 +102,6 @@ namespace datalog {
     public:
         
         add_invariant_model_converter(ast_manager& m): m(m), a(m), m_funcs(m), m_invs(m) {}
-
-        ~add_invariant_model_converter() override { }
 
         void add(func_decl* p, expr* inv) {
             if (!m.is_true(inv)) {

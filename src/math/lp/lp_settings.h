@@ -24,6 +24,7 @@ Revision History:
 #include <algorithm>
 #include <limits>
 #include <iomanip>
+#include <iostream>
 #include <cstring>
 #include "util/stopwatch.h"
 #include "util/statistics.h"
@@ -52,10 +53,8 @@ inline std::ostream& operator<<(std::ostream& out, column_type const& t) {
 }
 
 enum class simplex_strategy_enum {
-    undecided = 3,
-    tableau_rows = 0,
-    tableau_costs = 1,
-    lu = 2
+    tableau_rows,
+    tableau_costs
 };
 
 std::string column_type_to_string(column_type t);
@@ -69,9 +68,7 @@ enum class lp_status {
     DUAL_UNBOUNDED,
     OPTIMAL,
     FEASIBLE,
-    FLOATING_POINT_ERROR,
     TIME_EXHAUSTED,
-    ITERATIONS_EXHAUSTED,
     EMPTY,
     UNSTABLE,
     CANCELLED
@@ -80,9 +77,8 @@ enum class lp_status {
 // when the ratio of the vector length to domain size to is greater than the return value we switch to solve_By_for_T_indexed_only
 template <typename X>
 unsigned ratio_of_index_size_to_all_size() {
-    if (numeric_traits<X>::precise())
         return 10;
-    return 120;
+    
 }
 
 const char* lp_status_to_string(lp_status status);
@@ -93,41 +89,50 @@ inline std::ostream& operator<<(std::ostream& out, lp_status status) {
 
 lp_status lp_status_from_string(std::string status);
 
-enum non_basic_column_value_position { at_lower_bound, at_upper_bound, at_fixed, free_of_bounds, not_at_bound };
-
-template <typename X> bool is_epsilon_small(const X & v, const double& eps);    // forward definition
 
 class lp_resource_limit {
 public:
+    virtual ~lp_resource_limit() = default;
     virtual bool get_cancel_flag() = 0;
 };
 
 struct statistics {
-    unsigned m_make_feasible;
-    unsigned m_total_iterations;
-    unsigned m_iters_with_no_cost_growing;
-    unsigned m_num_factorizations;
-    unsigned m_num_of_implied_bounds;
-    unsigned m_need_to_solve_inf;
-    unsigned m_max_cols;
-    unsigned m_max_rows;
-    unsigned m_gcd_calls;
-    unsigned m_gcd_conflicts;
-    unsigned m_cube_calls;
-    unsigned m_cube_success;
-    unsigned m_patches;
-    unsigned m_patches_success;
-    unsigned m_hnf_cutter_calls;
-    unsigned m_hnf_cuts;
-    unsigned m_nla_calls;
-    unsigned m_horner_calls;
-    unsigned m_horner_conflicts;
-    unsigned m_cross_nested_forms;
-    unsigned m_grobner_calls;
-    unsigned m_grobner_conflicts;
-    unsigned m_cheap_eqs;
-    statistics() { reset(); }
-    void reset() { memset(this, 0, sizeof(*this)); }
+    unsigned m_make_feasible = 0;
+    unsigned m_total_iterations = 0;
+    unsigned m_iters_with_no_cost_growing = 0;
+    unsigned m_num_factorizations = 0;
+    unsigned m_num_of_implied_bounds = 0;
+    unsigned m_need_to_solve_inf = 0;
+    unsigned m_max_cols = 0;
+    unsigned m_max_rows = 0;
+    unsigned m_gcd_calls = 0;
+    unsigned m_gcd_conflicts = 0;
+    unsigned m_cube_calls = 0;
+    unsigned m_cube_success = 0;
+    unsigned m_patches = 0;
+    unsigned m_patches_success = 0;
+    unsigned m_hnf_cutter_calls = 0;
+    unsigned m_hnf_cuts = 0;
+    unsigned m_nla_calls = 0;
+    unsigned m_gomory_cuts = 0;
+    unsigned m_nla_add_bounds = 0;
+    unsigned m_nla_propagate_bounds = 0;
+    unsigned m_nla_propagate_eq = 0;
+    unsigned m_nla_lemmas = 0;
+    unsigned m_nra_calls = 0;
+    unsigned m_nla_bounds_improvements = 0;
+    unsigned m_horner_calls = 0;
+    unsigned m_horner_conflicts = 0;
+    unsigned m_cross_nested_forms = 0;
+    unsigned m_grobner_calls = 0;
+    unsigned m_grobner_conflicts = 0;
+    unsigned m_offset_eqs = 0;
+    unsigned m_fixed_eqs = 0;
+    ::statistics m_st = {};
+
+    void reset() {
+        *this = statistics{};
+    }
     void collect_statistics(::statistics& st) const {
         st.update("arith-factorizations", m_num_factorizations);
         st.update("arith-make-feasible", m_make_feasible);
@@ -141,13 +146,21 @@ struct statistics {
         st.update("arith-patches-success", m_patches_success);
         st.update("arith-hnf-calls", m_hnf_cutter_calls);
         st.update("arith-hnf-cuts", m_hnf_cuts);
+        st.update("arith-gomory-cuts", m_gomory_cuts);
         st.update("arith-horner-calls", m_horner_calls);
         st.update("arith-horner-conflicts", m_horner_conflicts);
         st.update("arith-horner-cross-nested-forms", m_cross_nested_forms);
         st.update("arith-grobner-calls", m_grobner_calls);
         st.update("arith-grobner-conflicts", m_grobner_conflicts);
-        st.update("arith-cheap-eqs", m_cheap_eqs);
-
+        st.update("arith-offset-eqs", m_offset_eqs);
+        st.update("arith-fixed-eqs", m_fixed_eqs);
+        st.update("arith-nla-add-bounds", m_nla_add_bounds);
+        st.update("arith-nla-propagate-bounds", m_nla_propagate_bounds);
+        st.update("arith-nla-propagate-eq", m_nla_propagate_eq);
+        st.update("arith-nla-lemmas", m_nla_lemmas);
+        st.update("arith-nra-calls", m_nra_calls);   
+        st.update("arith-bounds-improvements", m_nla_bounds_improvements);
+        st.copy(m_st);
     }
 };
 
@@ -166,11 +179,11 @@ private:
     };
 
     default_lp_resource_limit m_default_resource_limit;
-    lp_resource_limit*        m_resource_limit;
+    lp_resource_limit*        m_resource_limit = nullptr;
     // used for debug output
-    std::ostream*             m_debug_out;
+    std::ostream*             m_debug_out = nullptr;
     // used for messages, for example, the computation progress messages
-    std::ostream*             m_message_out;
+    std::ostream*             m_message_out = nullptr;
 
     statistics                m_stats;
     random_gen                m_rand;
@@ -181,73 +194,48 @@ public:
     unsigned nlsat_delay() const { return m_nlsat_delay; }
     bool int_run_gcd_test() const { return m_int_run_gcd_test; }
     bool& int_run_gcd_test() { return m_int_run_gcd_test; }
-    unsigned      reps_in_scaler { 20 };
-    // when the absolute value of an element is less than pivot_epsilon
-    // in pivoting, we treat it as a zero
-    double        pivot_epsilon { 0.00000001 };
-    // see Chatal, page 115
-    double        positive_price_epsilon { 1e-7 };
-    // a quotation "if some choice of the entering variable leads to an eta matrix
-    // whose diagonal element in the eta column is less than e2 (entering_diag_epsilon) in magnitude, the this choice is rejected ...
-    double        entering_diag_epsilon { 1e-8 };
-    int           c_partial_pivoting { 10 }; // this is the constant c from page 410
-    unsigned      depth_of_rook_search { 4 };
-    bool          using_partial_pivoting { true };
-    // dissertation of Achim Koberstein
-    // if Bx - b is different at any component more that refactor_epsilon then we refactor
-    double       refactor_tolerance { 1e-4 };
-    double       pivot_tolerance { 1e-6 };
-    double       zero_tolerance { 1e-12 };
-    double       drop_tolerance { 1e-14 };
-    double       tolerance_for_artificials { 1e-4 };
-    double       can_be_taken_to_basis_tolerance { 0.00001 };
-
-    unsigned     percent_of_entering_to_check { 5 }; // we try to find a profitable column in a percentage of the columns
-    bool         use_scaling { true };
-    double       scaling_maximum { 1.0 };
-    double       scaling_minimum { 0.5 };
-    double       harris_feasibility_tolerance { 1e-7 };         // page 179 of Istvan Maros
-    double       ignore_epsilon_of_harris { 10e-5 };
-    unsigned     max_number_of_iterations_with_no_improvements { 2000000 };
-    unsigned     max_total_number_of_iterations { 20000000 };
-    double       time_limit; // the maximum time limit of the total run time in seconds
-    // dual section
-    double       dual_feasibility_tolerance { 1e-7 };            // page 71 of the PhD thesis of Achim Koberstein
-    double       primal_feasibility_tolerance { 1e-7 };          // page 71 of the PhD thesis of Achim Koberstein
-    double       relative_primal_feasibility_tolerance { 1e-9 }; // page 71 of the PhD thesis of Achim Koberstein
+    unsigned      reps_in_scaler = 20;
+    int           c_partial_pivoting = 10; // this is the constant c from page 410
+    unsigned      depth_of_rook_search = 4;
+    bool          using_partial_pivoting = true;
+    
+    unsigned     percent_of_entering_to_check = 5; // we try to find a profitable column in a percentage of the columns
+    bool         use_scaling = true;
+    unsigned     max_number_of_iterations_with_no_improvements = 2000000;
+ double       time_limit; // the maximum time limit of the total run time in seconds
     // end of dual section
-    bool                   m_bound_propagation { true };
-    bool                   presolve_with_double_solver_for_lar { true };
+    bool                   m_bound_propagation = true;
+    bool                   presolve_with_double_solver_for_lar = true;
     simplex_strategy_enum  m_simplex_strategy;
     
-    int              report_frequency { 1000 };
-    bool             print_statistics { false };
-    unsigned         column_norms_update_frequency { 12000 };
-    bool             scale_with_ratio { true };
-    double           density_threshold { 0.7 };
-    bool             use_breakpoints_in_feasibility_search { false };
-    unsigned         max_row_length_for_bound_propagation { 300 };
-    bool             backup_costs { true };
-    unsigned         column_number_threshold_for_using_lu_in_lar_solver { 4000 };
-    unsigned         m_int_gomory_cut_period { 4 };
-    unsigned         m_int_find_cube_period { 4 };
+    int              report_frequency = 1000;
+    bool             print_statistics = false;
+    unsigned         column_norms_update_frequency = 12000;
+    bool             scale_with_ratio = true;
+    unsigned         max_row_length_for_bound_propagation = 300;
+    bool             backup_costs = true;
+    unsigned         column_number_threshold_for_using_lu_in_lar_solver = 4000;
+    unsigned         m_int_gomory_cut_period = 4;
+    unsigned         m_int_find_cube_period = 4;
 private:
-    unsigned         m_hnf_cut_period { 4 };
-    bool             m_int_run_gcd_test { true };
+    unsigned         m_hnf_cut_period = 4;
+    bool             m_int_run_gcd_test = true;
 public:
-    unsigned         limit_on_rows_for_hnf_cutter { 75 };
-    unsigned         limit_on_columns_for_hnf_cutter { 150 };
+    unsigned         limit_on_rows_for_hnf_cutter = 75;
+    unsigned         limit_on_columns_for_hnf_cutter = 150;
 private:
     unsigned         m_nlsat_delay;
-    bool             m_enable_hnf { true };
-    bool             m_print_external_var_name { false };
-    bool             m_cheap_eqs { false };
+    bool             m_enable_hnf = true;
+    bool             m_print_external_var_name = false;
+    bool             m_propagate_eqs = false;
 public:
     bool print_external_var_name() const { return m_print_external_var_name; }
-    bool cheap_eqs() const { return m_cheap_eqs;}
+    bool propagate_eqs() const { return m_propagate_eqs;}
     unsigned hnf_cut_period() const { return m_hnf_cut_period; }
     void set_hnf_cut_period(unsigned period) { m_hnf_cut_period = period;  }
     unsigned random_next() { return m_rand(); }
+    unsigned random_next(unsigned u ) { return m_rand(u); }
+    
     void set_random_seed(unsigned s) { m_rand.set_seed(s); }
 
     bool bound_progation() const { 
@@ -274,84 +262,12 @@ public:
     std::ostream* get_debug_ostream() { return m_debug_out; }
     std::ostream* get_message_ostream() { return m_message_out; }
     statistics& stats() { return m_stats; }
-    statistics const& stats() const { return m_stats; }
-
-    template <typename T> static bool is_eps_small_general(const T & t, const double & eps) {
-        return (!numeric_traits<T>::precise())? is_epsilon_small<T>(t, eps) : numeric_traits<T>::is_zero(t);
-    }
-
-    template <typename T>
-    bool abs_val_is_smaller_than_dual_feasibility_tolerance(T const & t) {
-        return is_eps_small_general<T>(t, dual_feasibility_tolerance);
-    }
-
-    template <typename T>
-    bool abs_val_is_smaller_than_primal_feasibility_tolerance(T const & t) {
-        return is_eps_small_general<T>(t, primal_feasibility_tolerance);
-    }
-
-    template <typename T>
-    bool abs_val_is_smaller_than_can_be_taken_to_basis_tolerance(T const & t) {
-        return is_eps_small_general<T>(t, can_be_taken_to_basis_tolerance);
-    }
-
-    template <typename T>
-    bool abs_val_is_smaller_than_drop_tolerance(T const & t) const {
-        return is_eps_small_general<T>(t, drop_tolerance);
-    }
-
-
-    template <typename T>
-    bool abs_val_is_smaller_than_zero_tolerance(T const & t) {
-        return is_eps_small_general<T>(t, zero_tolerance);
-    }
-
-    template <typename T>
-    bool abs_val_is_smaller_than_refactor_tolerance(T const & t) {
-        return is_eps_small_general<T>(t, refactor_tolerance);
-    }
-
-
-    template <typename T>
-    bool abs_val_is_smaller_than_pivot_tolerance(T const & t) {
-        return is_eps_small_general<T>(t, pivot_tolerance);
-    }
-
-    template <typename T>
-    bool abs_val_is_smaller_than_harris_tolerance(T const & t) {
-        return is_eps_small_general<T>(t, harris_feasibility_tolerance);
-    }
-
-    template <typename T>
-    bool abs_val_is_smaller_than_ignore_epslilon_for_harris(T const & t) {
-        return is_eps_small_general<T>(t, ignore_epsilon_of_harris);
-    }
-
-    template <typename T>
-    bool abs_val_is_smaller_than_artificial_tolerance(T const & t) {
-        return is_eps_small_general<T>(t, tolerance_for_artificials);
-    }
+    statistics const& stats() const { return m_stats; }    
+    
     // the method of lar solver to use
-    simplex_strategy_enum simplex_strategy() const {
-        return m_simplex_strategy;
-    }
-
-    simplex_strategy_enum & simplex_strategy() {
-        return m_simplex_strategy;
-    }
-
-    bool use_lu() const {
-        return m_simplex_strategy == simplex_strategy_enum::lu;
-    }
-
-    bool use_tableau() const {
-        return m_simplex_strategy == simplex_strategy_enum::tableau_rows ||
-            m_simplex_strategy == simplex_strategy_enum::tableau_costs;
-    }
-
-    bool use_tableau_rows() const {
-        return m_simplex_strategy == simplex_strategy_enum::tableau_rows;
-    }
+    simplex_strategy_enum simplex_strategy() const { return m_simplex_strategy; }
+    simplex_strategy_enum & simplex_strategy()  { return m_simplex_strategy; }
+    bool use_tableau_rows() const { return m_simplex_strategy == simplex_strategy_enum::tableau_rows; }
     
 #ifdef Z3DEBUG
 static unsigned ddd; // used for debugging    
@@ -382,13 +298,6 @@ inline std::string T_to_string(const mpq & t) {
     return strs.str();
 }
 
-template <typename T>
-bool val_is_smaller_than_eps(T const & t, double const & eps) {
-    if (!numeric_traits<T>::precise()) {
-        return numeric_traits<T>::get_double(t) < eps;
-    }
-    return t <= numeric_traits<T>::zero();
-}
 
 template <typename T>
 bool vectors_are_equal(T * a, vector<T>  &b, unsigned n);

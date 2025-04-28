@@ -102,6 +102,7 @@ Z3_ast Z3_API NAME(Z3_context c, unsigned i, Z3_ast n) {                \
     MK_BV_PUNARY(Z3_mk_sign_ext, OP_SIGN_EXT);
     MK_BV_PUNARY(Z3_mk_zero_ext, OP_ZERO_EXT);
     MK_BV_PUNARY(Z3_mk_repeat,   OP_REPEAT);
+    MK_BV_PUNARY(Z3_mk_bit2bool,   OP_BIT2BOOL);
     MK_BV_PUNARY(Z3_mk_rotate_left, OP_ROTATE_LEFT);
     MK_BV_PUNARY(Z3_mk_rotate_right, OP_ROTATE_RIGHT);
     MK_BV_PUNARY(Z3_mk_int2bv, OP_INT2BV);
@@ -226,6 +227,9 @@ Z3_ast Z3_API NAME(Z3_context c, unsigned i, Z3_ast n) {                \
     Z3_ast Z3_API Z3_mk_bvadd_no_underflow(Z3_context c, Z3_ast t1, Z3_ast t2) {
         Z3_TRY;
         RESET_ERROR_CODE();
+        // l1 := t1 <s 0
+        // l2 := t2 <s 0
+        // l1 & l2 => t1 + t2 <s 0
         Z3_ast zero = Z3_mk_int(c, 0, Z3_get_sort(c, t1));
         Z3_inc_ref(c, zero);
         Z3_ast r = Z3_mk_bvadd(c, t1, t2);
@@ -254,6 +258,10 @@ Z3_ast Z3_API NAME(Z3_context c, unsigned i, Z3_ast n) {                \
     Z3_ast Z3_API Z3_mk_bvsub_no_overflow(Z3_context c, Z3_ast t1, Z3_ast t2) {
         Z3_TRY;
         RESET_ERROR_CODE();
+        // x := t2 = min_int
+        // y := t1 <s 0
+        // z := no_overflow(t1 + -t2)
+        // if x y z
         Z3_ast minus_t2 = Z3_mk_bvneg(c, t2);
         Z3_inc_ref(c, minus_t2);
         Z3_sort s = Z3_get_sort(c, t2);
@@ -283,6 +291,9 @@ Z3_ast Z3_API NAME(Z3_context c, unsigned i, Z3_ast n) {                \
         Z3_TRY;
         RESET_ERROR_CODE();
         if (is_signed) {
+            // x := 0 <s -t2
+            // y := no_underflow(x + -t2)
+            // x => y
             Z3_ast zero = Z3_mk_int(c, 0, Z3_get_sort(c, t1));
             Z3_inc_ref(c, zero);
             Z3_ast minus_t2 = Z3_mk_bvneg(c, t2);

@@ -209,10 +209,6 @@ namespace spacer {
 
     static proof_ref  mk_th_lemma(ast_manager &m, ptr_buffer<proof> const &parents,
                                   unsigned num_params, parameter const *params) {
-        buffer<parameter> v;
-        for (unsigned i = 1; i < num_params; ++i)
-            v.push_back(params[i]);
-
         SASSERT(params[0].is_symbol());
         family_id tid = m.mk_family_id(params[0].get_symbol());
         SASSERT(tid != null_family_id);
@@ -220,7 +216,7 @@ namespace spacer {
         proof_ref pf(m);
         pf =  m.mk_th_lemma(tid, m.mk_false(),
                             parents.size(), parents.data(),
-                            v.size(), v.data());
+                            num_params - 1, params + 1);
         return pf;
     }
 
@@ -284,6 +280,11 @@ namespace spacer {
                                    ptr_buffer<proof> const &parents,
                                    unsigned num_params,
                                    parameter const *params) {
+        if(num_params != parents.size() + 1) {
+            //TODO: fix bug
+            TRACE("spacer.fkab", tout << "UNEXPECTED INPUT TO FUNCTION. Bailing out\n";);
+            return proof_ref(m);
+        }
         SASSERT(num_params == parents.size() + 1 /* one param is missing */);
         arith_util a(m);
         th_rewriter rw(m);
@@ -431,8 +432,8 @@ namespace spacer {
 
                 ptr_buffer<expr> args;
                 for (unsigned i = 0, sz = m.get_num_parents(p); i < sz; ++i) {
-                    proof *pp, *tmp;
-                    pp = m.get_parent(p, i);
+                    proof *tmp = nullptr;
+                    proof* pp = m.get_parent(p, i);
                     VERIFY(m_cache.find(pp, tmp));
                     args.push_back(tmp);
                     dirty |= (pp != tmp);
@@ -454,8 +455,8 @@ namespace spacer {
             }
         }
 
-        proof* res;
-        VERIFY(m_cache.find(pr,res));
+        proof* res = nullptr;
+        VERIFY(m_cache.find(pr, res));
         DEBUG_CODE(
             proof_checker pc(m);
             expr_ref_vector side(m);

@@ -24,6 +24,10 @@ Revision History:
 #include "util/util.h"
 #include "util/vector.h"
 #include<iomanip>
+#ifdef Z3DEBUG
+# include <iostream>
+#endif
+
 
 small_object_allocator::small_object_allocator(char const * id) {
     for (unsigned i = 0; i < NUM_SLOTS; i++) {
@@ -95,7 +99,9 @@ void small_object_allocator::deallocate(size_t size, void * p) {
 
 
 void * small_object_allocator::allocate(size_t size) {
-    if (size == 0) return nullptr;
+    if (size == 0) 
+        return nullptr;
+
 
 
 #if defined(Z3DEBUG) && !defined(_WINDOWS)
@@ -106,6 +112,8 @@ void * small_object_allocator::allocate(size_t size) {
     if (size >= SMALL_OBJ_SIZE - (1 << PTR_ALIGNMENT)) {
         return memory::allocate(size);
     }
+
+
 #ifdef Z3DEBUG
     size_t osize = size;
 #endif

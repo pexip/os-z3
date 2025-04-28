@@ -18,17 +18,21 @@ Author:
 
 #include "sat/smt/pb_solver.h"
 #include "ast/pb_decl_plugin.h"
+#include "sat/smt/euf_solver.h"
 
 namespace pb {
 
-    void solver::internalize(expr* e, bool redundant) {
-        internalize(e, false, false, redundant);
+    void solver::internalize(expr* e) {
+        internalize(e, false, false);
     }
 
-    literal solver::internalize(expr* e, bool sign, bool root, bool redundant) {
-        flet<bool> _redundant(m_is_redundant, redundant);
-        if (m_pb.is_pb(e)) 
-            return internalize_pb(e, sign, root);
+    literal solver::internalize(expr* e, bool sign, bool root) {
+        if (m_pb.is_pb(e)) {
+            sat::literal lit = internalize_pb(e, sign, root);
+            if (m_ctx && !root && lit != sat::null_literal)
+                m_ctx->attach_lit(literal(lit.var(), false), e);            
+            return lit;
+        }
         UNREACHABLE();
         return sat::null_literal;
     }
@@ -37,6 +41,11 @@ namespace pb {
         SASSERT(m_pb.is_pb(e));
         app* t = to_app(e);
         rational k = m_pb.get_k(t);
+        if (!root && is_app(e)) {
+            sat::literal lit = si.get_cached(to_app(e));
+            if (lit != sat::null_literal)
+                return sign ? ~lit : lit;
+        }
         switch (t->get_decl_kind()) {
         case OP_AT_MOST_K:
             return convert_at_most_k(t, k, root, sign);
@@ -79,7 +88,7 @@ namespace pb {
 
     void solver::convert_pb_args(app* t, literal_vector& lits) {
         for (expr* arg : *t) {
-            lits.push_back(si.internalize(arg, m_is_redundant));
+            lits.push_back(si.internalize(arg));
             s().set_external(lits.back().var());
         }
     }
@@ -109,13 +118,13 @@ namespace pb {
                     k1 += wl.first;
                 }
             }
-            add_pb_ge(sat::null_bool_var, wlits, k1);
+            add_pb_ge(sat::null_bool_var, sign, wlits, k1);
             return sat::null_literal;
         }
         else {
             bool_var v = s().add_var(true);
             literal lit(v, sign);
-            add_pb_ge(v, wlits, k.get_unsigned());
+            add_pb_ge(v, false, wlits, k.get_unsigned());
             TRACE("ba", tout << "root: " << root << " lit: " << lit << "\n";);
             return lit;
         }
@@ -136,13 +145,13 @@ namespace pb {
                     k1 += wl.first;
                 }
             }
-            add_pb_ge(sat::null_bool_var, wlits, k1);
+            add_pb_ge(sat::null_bool_var, sign, wlits, k1);
             return sat::null_literal;
         }
         else {
             sat::bool_var v = s().add_var(true);
             sat::literal lit(v, sign);
-            add_pb_ge(v, wlits, k.get_unsigned());
+            add_pb_ge(v, false, wlits, k.get_unsigned());
             TRACE("goal2sat", tout << "root: " << root << " lit: " << lit << "\n";);
             return lit;
         }
@@ -156,14 +165,23 @@ namespace pb {
         bool base_assert = (root && !sign && s().num_user_scopes() == 0);
         bool_var v1 = base_assert ? sat::null_bool_var : s().add_var(true);
         bool_var v2 = base_assert ? sat::null_bool_var : s().add_var(true);
-        add_pb_ge(v1, wlits, k.get_unsigned());
+        add_pb_ge(v1, false, wlits, k.get_unsigned());
         k.neg();
         for (wliteral& wl : wlits) {
             wl.second.neg();
             k += rational(wl.first);
         }
+        if (k < 0) {
+            bool_var v = s().add_var(false);
+            literal l(v, false);
+            s().assign_unit(~l);
+            si.cache(t, l);
+            if (sign) l.neg();
+            return l;
+        }
+            
         check_unsigned(k);
-        add_pb_ge(v2, wlits, k.get_unsigned());
+        add_pb_ge(v2, false, wlits, k.get_unsigned());
         if (base_assert) {
             return sat::null_literal;
         }

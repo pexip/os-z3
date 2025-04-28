@@ -20,7 +20,7 @@ Notes:
 #include "ast/ast.h"
 #include "ast/arith_decl_plugin.h"
 #include "ast/bv_decl_plugin.h"
-#include "tactic/model_converter.h"
+#include "ast/converters/model_converter.h"
 #include "tactic/tactic.h"
 #include "qe/qsat.h"
 #include "opt/opt_solver.h"
@@ -45,6 +45,7 @@ namespace opt {
 
     class maxsat_context {
     public:        
+        virtual ~maxsat_context() = default;
         virtual generic_model_converter& fm() = 0;   // converter that removes fresh names introduced by simplification.
         virtual bool sat_enabled() const = 0;       // is using th SAT solver core enabled?
         virtual solver& get_solver() = 0;           // retrieve solver object (SAT or SMT solver)
@@ -56,6 +57,8 @@ namespace opt {
         virtual smt::context& smt_context() = 0;    // access SMT context for SMT based MaxSMT solver (wmax requires SMT core)
         virtual unsigned num_objectives() = 0;
         virtual bool verify_model(unsigned id, model* mdl, rational const& v) = 0;
+        virtual rational adjust(unsigned id, rational const& v) = 0;
+        virtual void add_offset(unsigned id, rational const& o) = 0;
         virtual void set_model(model_ref& _m) = 0;
         virtual void model_updated(model* mdl) = 0;
     };
@@ -92,7 +95,7 @@ namespace opt {
             app_ref     m_term;          // for maximize, minimize term
             expr_ref_vector   m_terms;   // for maxsmt
             vector<rational>  m_weights; // for maxsmt
-            adjust_value  m_adjust_value;
+            adjust_value      m_adjust_value;
             symbol      m_id;            // for maxsmt
             unsigned    m_index;         // for maximize/minimize index
 
@@ -117,6 +120,17 @@ namespace opt {
             {}
         };
 
+      double m_time = 0;      
+      class scoped_time {
+        context& c;
+        timer t;
+      public:
+        scoped_time(context& c):c(c) { c.m_time = 0; }
+        ~scoped_time() { c.m_time = t.get_seconds(); }
+      };
+
+
+
         class scoped_state {
             ast_manager& m;
             arith_util   m_arith;
@@ -126,12 +140,14 @@ namespace opt {
             unsigned_vector  m_objectives_lim;
             unsigned_vector  m_objectives_term_trail;
             unsigned_vector  m_objectives_term_trail_lim;
+            unsigned_vector  m_values_lim;
             map_id           m_indices;
 
         public:
             expr_ref_vector   m_hard;
             expr_ref_vector   m_asms;
             vector<objective> m_objectives;
+            vector<std::pair<expr_ref, expr_ref>> m_values;
 
             scoped_state(ast_manager& m):
                 m(m),
@@ -150,9 +166,9 @@ namespace opt {
             unsigned get_index(symbol const& id) { return m_indices[id]; }
         };
 
-        ast_manager&        m;
         on_model_t          m_on_model_ctx;
         std::function<void(on_model_t&, model_ref&)> m_on_model_eh;
+        bool                m_calling_on_model = false;
         arith_util          m_arith;
         bv_util             m_bv;
         expr_ref_vector     m_hard_constraints;
@@ -179,11 +195,12 @@ namespace opt {
         func_decl_ref_vector         m_objective_refs;
         expr_ref_vector              m_core;
         tactic_ref                   m_simplify;
-        bool                         m_enable_sat { true } ;
-        bool                         m_enable_sls { false };
-        bool                         m_is_clausal { false };
-        bool                         m_pp_neat { true };
-        bool                         m_pp_wcnf { false };
+        bool                         m_enable_sat = true;
+        bool                         m_enable_sls = false;
+        bool                         m_is_clausal = false;
+        bool                         m_pp_neat = false;
+        bool                         m_pp_wcnf = false;
+        bool                         m_incremental = false;
         symbol                       m_maxsat_engine;
         symbol                       m_logic;
         svector<symbol>              m_labels;
@@ -210,7 +227,7 @@ namespace opt {
         void get_box_model(model_ref& _m, unsigned index) override;
         void fix_model(model_ref& _m) override;
         void collect_statistics(statistics& stats) const override;
-        proof* get_proof() override { return nullptr; }
+        proof* get_proof_core() override { return nullptr; }
         void get_labels(svector<symbol> & r) override;
         void get_unsat_core(expr_ref_vector & r) override;
         std::string reason_unknown() const override;
@@ -256,10 +273,22 @@ namespace opt {
         
         void model_updated(model* mdl) override;
 
+        rational adjust(unsigned id, rational const& v) override;
+
+        void add_offset(unsigned id, rational const& o) override;
+
+        void initialize_value(expr* var, expr* value) override;
+        
         void register_on_model(on_model_t& ctx, std::function<void(on_model_t&, model_ref&)>& on_model) { 
             m_on_model_ctx = ctx; 
             m_on_model_eh  = on_model; 
         }
+      
+        void collect_timer_stats(statistics& st) const {
+	  if (m_time != 0) 
+	    st.update("time", m_time);
+	}
+
 
     private:
         lbool execute(objective const& obj, bool committed, bool scoped);
@@ -278,6 +307,7 @@ namespace opt {
         void import_scoped_state();
         void normalize(expr_ref_vector const& asms);
         void internalize();
+        bool is_objective(expr* fml);
         bool is_maximize(expr* fml, app_ref& term, expr_ref& orig_term, unsigned& index);
         bool is_minimize(expr* fml, app_ref& term, expr_ref& orig_term, unsigned& index);
         bool is_maxsat(expr* fml, expr_ref_vector& terms, 
@@ -304,6 +334,7 @@ namespace opt {
 
         struct is_fd;
         bool probe_fd();
+        bool is_maxsat_query();
 
         struct is_propositional_fn;
         bool is_propositional(expr* e);
@@ -340,6 +371,8 @@ namespace opt {
         // quantifiers
         bool is_qsat_opt();
         lbool run_qsat_opt();
+
+      
     };
 
 }

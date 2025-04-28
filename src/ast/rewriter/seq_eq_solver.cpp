@@ -15,6 +15,7 @@ Author:
 
 --*/
 
+#include "ast/ast_pp.h"
 #include "ast/rewriter/seq_eq_solver.h"
 #include "ast/bv_decl_plugin.h"
 
@@ -189,8 +190,8 @@ namespace seq {
             expr_ref digit = m_ax.sk().mk_digit2int(u);
             add_consequence(m_ax.mk_ge(digit, 1));
         }
-	    expr_ref y(seq.str.mk_concat(es, es[0]->get_sort()), m);
-	    ctx.add_solution(seq.str.mk_itos(n), y);
+        expr_ref y(seq.str.mk_concat(es, es[0]->get_sort()), m);
+        ctx.add_solution(seq.str.mk_itos(n), y);
         return true;
     }
 
@@ -437,6 +438,10 @@ namespace seq {
             !seq.str.is_unit(a) &&
             !seq.str.is_itos(a) &&
             !seq.str.is_nth_i(a) &&
+            !seq.str.is_map(a) &&
+            !seq.str.is_mapi(a) &&
+            !seq.str.is_foldl(a) &&
+            !seq.str.is_foldli(a) &&
             !m.is_ite(a);
     }
 
@@ -675,7 +680,7 @@ namespace seq {
             if (rs.size() > i) {
                 unsigned diff = rs.size() - (i + 1);
                 for (unsigned j = 0; same && j < i; ++j) 
-                    same = !m.are_distinct(ls[j], rs[diff + j]);                               
+                    same = !m.are_distinct(ls[j], rs[diff + j]);
             }
             // ls = x ++ rs ++ y, diff = |x|
             else {
@@ -704,8 +709,9 @@ namespace seq {
             bool same = true;
             // ls = x ++ rs' && rs = rs' ++ y, diff = |x|
             if (rs.size() > i) {
-                for (unsigned j = 1; same && j <= i; ++j) 
-                    same = !m.are_distinct(ls[diff + j], rs[j]);                
+                for (unsigned j = 1; same && j <= i; ++j) {
+                    same = !m.are_distinct(ls[diff + j], rs[j]);
+                }
             }
             // ls = x ++ rs ++ y, diff = |x|
             else {
@@ -715,6 +721,7 @@ namespace seq {
             if (same)
                 return true;
         }
+        
         return false;
     }
 

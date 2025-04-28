@@ -41,16 +41,19 @@ Revision History:
 
 #if defined(_MP_GMP)
 // Use LEHMER only if not using GMP
-// LEHMER assumes 32-bit digits, so it cannot be used with MSBIGNUM library + 64-bit binary
 #define EUCLID_GCD
 #else
 #define LEHMER_GCD
 #endif
 
-
-#if defined(__GNUC__)
+#ifdef __has_builtin
+    #define HAS_BUILTIN(X) __has_builtin(X)
+#else
+    #define HAS_BUILTIN(X) 0
+#endif
+#if HAS_BUILTIN(__builtin_ctz)
 #define _trailing_zeros32(X) __builtin_ctz(X)
-#elif defined(_WINDOWS) && !defined(_M_ARM) && !defined(_M_ARM64) && !defined(__MINGW32__)
+#elif defined(_WINDOWS) && (defined(_M_X86) || (defined(_M_X64) && !defined(_M_ARM64EC))) && !defined(__clang__)
 // This is needed for _tzcnt_u32 and friends.
 #include <immintrin.h>
 #define _trailing_zeros32(X) _tzcnt_u32(X)
@@ -62,12 +65,12 @@ static uint32_t _trailing_zeros32(uint32_t x) {
 }
 #endif
 
-#if (defined(__LP64__) || defined(_WIN64)) && !defined(_M_ARM) && !defined(_M_ARM64)
- #if defined(__GNUC__)
- #define _trailing_zeros64(X) __builtin_ctzll(X)
- #else
- #define _trailing_zeros64(X) _tzcnt_u64(X)
- #endif
+#if (defined(__LP64__) || defined(_WIN64)) && defined(_M_X64) && !defined(_M_ARM64EC)
+#if HAS_BUILTIN(__builtin_ctzll)
+#define _trailing_zeros64(X) __builtin_ctzll(X)
+#elif !defined(__clang__)
+#define _trailing_zeros64(X) _tzcnt_u64(X)
+#endif
 #else
 static uint64_t _trailing_zeros64(uint64_t x) {
     uint64_t r = 0;
@@ -76,6 +79,15 @@ static uint64_t _trailing_zeros64(uint64_t x) {
 }
 #endif
 
+#undef HAS_BUILTIN
+
+unsigned trailing_zeros(uint32_t x) {
+    return static_cast<unsigned>(_trailing_zeros32(x));
+}
+
+unsigned trailing_zeros(uint64_t x) {
+    return static_cast<unsigned>(_trailing_zeros64(x));
+}
 
 #define _bit_min(x, y) (y + ((x - y) & ((int)(x - y) >> 31)))
 #define _bit_max(x, y) (x - ((x - y) & ((int)(x - y) >> 31)))
@@ -559,12 +571,13 @@ void mpz_manager<SYNCH>::machine_div_rem(mpz const & a, mpz const & b, mpz & q, 
 template<bool SYNCH>
 void mpz_manager<SYNCH>::machine_div(mpz const & a, mpz const & b, mpz & c) {
     STRACE("mpz", tout << "[mpz-ext] machine-div(" << to_string(a) << ",  " << to_string(b) << ") == ";); 
-    if (is_small(a) && is_small(b)) {
+    if (is_small(b) && i64(b) == 0)
+        throw default_exception("division by 0"); 
+
+    if (is_small(a) && is_small(b)) 
         set_i64(c, i64(a) / i64(b));
-    }
-    else {
+    else 
         big_div(a, b, c);
-    }
     STRACE("mpz", tout << to_string(c) << "\n";);
 }
 
@@ -688,7 +701,7 @@ void mpz_manager<SYNCH>::big_add_sub(mpz const & a, mpz const & b, mpz & c) {
     mpz_stack tmp;
     if (SUB)
         sign_b = -sign_b;
-    size_t real_sz;
+    unsigned real_sz;
     if (ca.sign() == sign_b) {
         unsigned sz  = std::max(ca.cell()->m_size, cb.cell()->m_size)+1;
         allocate_if_needed(tmp, sz);
@@ -696,7 +709,7 @@ void mpz_manager<SYNCH>::big_add_sub(mpz const & a, mpz const & b, mpz & c) {
                           cb.cell()->m_digits, cb.cell()->m_size, 
                           tmp.m_ptr->m_digits, sz, &real_sz);
         SASSERT(real_sz <= sz);
-        set(*tmp.m_ptr, c, ca.sign(), static_cast<unsigned>(real_sz));
+        set(*tmp.m_ptr, c, ca.sign(), real_sz);
     }
     else {
         digit_t borrow;
@@ -1453,9 +1466,11 @@ void mpz_manager<SYNCH>::bitwise_xor(mpz const & a, mpz const & b, mpz & c) {
 template<bool SYNCH>
 void mpz_manager<SYNCH>::bitwise_not(unsigned sz, mpz const & a, mpz & c) {
     SASSERT(is_nonneg(a));
-    if (is_small(a) && sz <= 63) {
-        int64_t mask = (static_cast<int64_t>(1) << sz) - static_cast<int64_t>(1);
-        set_i64(c, (~ i64(a)) & mask);
+    if (is_small(a) && sz <= 64) {
+        uint64_t v = ~get_uint64(a);
+        unsigned zero_out = 64 - sz;
+        v = (v << zero_out) >> zero_out;
+        set(c, v);
     }
     else {
         mpz a1, a2, m, tmp;
@@ -1841,7 +1856,7 @@ std::string mpz_manager<SYNCH>::to_string(mpz const & a) const {
 template<bool SYNCH>
 unsigned mpz_manager<SYNCH>::hash(mpz const & a) {
     if (is_small(a))
-        return a.m_val;
+        return ::abs(a.m_val);
 #ifndef _MP_GMP
     unsigned sz = size(a);
     if (sz == 1)
@@ -2247,6 +2262,9 @@ template<bool SYNCH>
 unsigned mpz_manager<SYNCH>::mlog2(mpz const & a) {
     if (is_nonneg(a))
         return 0;
+    if (is_small(a) && a.m_val == INT_MIN)
+        return ::log2((unsigned)a.m_val);
+        
     if (is_small(a))
         return ::log2((unsigned)-a.m_val);
 #ifndef _MP_GMP
@@ -2274,6 +2292,19 @@ unsigned mpz_manager<SYNCH>::bitsize(mpz const & a) {
         return log2(a) + 1;
     else
         return mlog2(a) + 1;
+}
+
+template<bool SYNCH>
+unsigned mpz_manager<SYNCH>::next_power_of_two(mpz const & a) {
+    if (is_nonpos(a))
+        return 0;
+    if (is_one(a))
+        return 0;
+    unsigned shift;
+    if (is_power_of_two(a, shift))
+        return shift;
+    else
+        return log2(a) + 1;
 }
 
 template<bool SYNCH>

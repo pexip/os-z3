@@ -131,6 +131,7 @@ namespace smt {
         special_relations_util         m_util;
         atoms                          m_atoms;
         unsigned_vector                m_atoms_lim;
+        ptr_vector<app>                m_terms;
         obj_map<func_decl, relation*>  m_relations;
         bool_var2atom                  m_bool_var2atom;
         bool                           m_can_propagate;
@@ -199,6 +200,8 @@ namespace smt {
         bool can_propagate() override { return m_can_propagate; }
         void propagate() override;
         void display(std::ostream & out) const override;
+
+        void get_specrels(func_decl_set& rels) const;
    
     };
 }

@@ -16,6 +16,7 @@ Notes:
 
 --*/
 #include<iomanip>
+#include "ast/ast.h"
 #include "cmd_context/cmd_context.h"
 #include "cmd_context/cmd_util.h"
 #include "ast/rewriter/rewriter.h"
@@ -26,7 +27,7 @@ Notes:
 #include "ast/ast_lt.h"
 #include "cmd_context/simplify_cmd.h"
 #include "ast/ast_smt2_pp.h"
-#include "tactic/arith/bound_manager.h"
+#include "ast/simplifiers/bound_manager.h"
 #include "ast/used_vars.h"
 #include "ast/rewriter/var_subst.h"
 #include "ast/ast_util.h"
@@ -34,7 +35,9 @@ Notes:
 #include "qe/qe_mbp.h"
 #include "qe/qe_mbi.h"
 #include "qe/mbp/mbp_term_graph.h"
-
+#include "qe/mbp/mbp_qel.h"
+#include "qe/lite/qe_lite_tactic.h"
+#include "qe/lite/qel.h"
 
 BINARY_SYM_CMD(get_quantifier_body_cmd,
                "dbg-get-qbody",
@@ -199,12 +202,12 @@ void tst_params(cmd_context & ctx) {
     params_ref p1;
     params_ref p2;
     p1.set_uint("val", 100);
-    p2 = p1;
+    p2.append(p1);
     SASSERT(p2.get_uint("val", 0) == 100);
     p2.set_uint("val", 200);
     SASSERT(p2.get_uint("val", 0) == 200);
     SASSERT(p1.get_uint("val", 0) == 100);
-    p2 = p1;
+    p2.append(p1);
     SASSERT(p2.get_uint("val", 0) == 100);
     SASSERT(p1.get_uint("val", 0) == 100);
     ctx.regular_stream() << "worked" << std::endl;
@@ -369,7 +372,7 @@ public:
             }
             vars.push_back(to_app(v));
         }
-        qe::mbproj mbp(m);
+        qe::mbproj mbp(m, gparams::get_module("smt"));
         expr_ref fml(m_fml, m);
         mbp.spacer(vars, *mdl.get(), fml);
         ctx.regular_stream() << fml << "\n";
@@ -377,8 +380,8 @@ public:
 };
 
 class get_interpolant_cmd : public cmd {
-    expr* m_a;
-    expr* m_b;
+    scoped_ptr<expr_ref> m_a;
+    scoped_ptr<expr_ref> m_b;
 public:
     get_interpolant_cmd():cmd("get-interpolant") {}
     char const * get_usage() const override { return "<expr> <expr>"; }
@@ -388,18 +391,35 @@ public:
         return CPK_EXPR; 
     }
     void set_next_arg(cmd_context& ctx, expr * arg) override { 
-        if (m_a == nullptr) 
-            m_a = arg; 
+        ast_manager& m = ctx.m();
+        if (!m.is_bool(arg))
+            throw default_exception("argument to interpolation is not Boolean");
+        if (!m_a) 
+            m_a = alloc(expr_ref, arg, m); 
         else 
-            m_b = arg; 
+            m_b = alloc(expr_ref, arg, m); 
     }
     void prepare(cmd_context & ctx) override { m_a = nullptr; m_b = nullptr;  }
     void execute(cmd_context & ctx) override { 
         ast_manager& m = ctx.m();
         qe::interpolator mbi(m);
+        if (!m_a || !m_b)
+            throw default_exception("interpolation requires two arguments");
+        if (!m.is_bool(*m_a) || !m.is_bool(*m_b))
+            throw default_exception("interpolation requires two Boolean arguments");
         expr_ref itp(m);
-         mbi.pogo(ctx.get_solver_factory(), m_a, m_b, itp);
-        ctx.regular_stream() << itp << "\n";
+        lbool r = mbi.pogo(ctx.get_solver_factory(), *m_a, *m_b, itp);
+        switch (r) {
+        case l_true:
+            ctx.regular_stream() << "sat\n";
+            break;
+        case l_undef:
+            ctx.regular_stream() << "unknown\n";
+            break;
+        case l_false:
+            ctx.regular_stream() << itp << "\n";
+            break;
+        }
     }
 };
 
@@ -555,8 +575,192 @@ public:
 
 };
 
+class mbp_qel_cmd : public cmd {
+    unsigned m_arg_index;
+    ptr_vector<expr> m_lits;
+    ptr_vector<expr> m_vars;
 
-void install_dbg_cmds(cmd_context & ctx) {
+  public:
+    mbp_qel_cmd() : cmd("mbp-qel"){};
+    char const *get_usage() const override { return "(exprs) (vars)"; }
+    char const *get_descr(cmd_context &ctx) const override {
+        return "Model based projection using e-graphs";
+    }
+    unsigned get_arity() const override { return 2; }
+    cmd_arg_kind next_arg_kind(cmd_context &ctx) const override {
+        return CPK_EXPR_LIST;
+    }
+    void set_next_arg(cmd_context &ctx, unsigned num,
+                      expr *const *args) override {
+        if (m_arg_index == 0) {
+            m_lits.append(num, args);
+            m_arg_index = 1;
+        }
+        else { m_vars.append(num, args); }
+    }
+    void prepare(cmd_context &ctx) override {
+        m_arg_index = 0;
+        m_lits.reset();
+        m_vars.reset();
+    }
+    void execute(cmd_context &ctx) override {
+        ast_manager &m = ctx.m();
+        app_ref_vector vars(m);
+        expr_ref fml(m);
+        expr_ref_vector lits(m);
+        for (expr *v : m_vars) vars.push_back(to_app(v));
+        for (expr *e : m_lits) lits.push_back(e);
+        fml = mk_and(lits);
+        solver_factory &sf = ctx.get_solver_factory();
+        params_ref pa;
+        solver_ref s = sf(m, pa, false, true, true, symbol::null);
+        s->assert_expr(fml);
+        lbool r = s->check_sat();
+        if (r != l_true) return;
+        model_ref mdl;
+        s->get_model(mdl);
+        mbp::mbp_qel mbptg(m, pa);
+        mbptg(vars, fml, *mdl.get());
+
+        ctx.regular_stream() << "------------------------------ " << std::endl;
+        ctx.regular_stream() << "Orig tg: " << mk_and(lits) << std::endl;
+        ctx.regular_stream() << "To elim: ";
+        for (expr *v : m_vars) {
+            ctx.regular_stream() << to_app(v)->get_decl()->get_name() << " ";
+        }
+        ctx.regular_stream() << std::endl;
+        ctx.regular_stream() << "output " << fml << std::endl;
+    }
+};
+
+class qel_cmd : public cmd {
+    unsigned m_arg_index;
+    ptr_vector<expr> m_lits;
+    ptr_vector<func_decl> m_vars;
+
+  public:
+    qel_cmd() : cmd("qel"){};
+    char const *get_usage() const override { return "(lits) (vars)"; }
+    char const *get_descr(cmd_context &ctx) const override {
+        return "QE lite over e-graphs";
+    }
+    unsigned get_arity() const override { return 2; }
+    cmd_arg_kind next_arg_kind(cmd_context &ctx) const override {
+        if (m_arg_index == 0) return CPK_EXPR_LIST;
+        return CPK_FUNC_DECL_LIST;
+    }
+    void set_next_arg(cmd_context &ctx, unsigned num,
+                      expr *const *args) override {
+        m_lits.append(num, args);
+        m_arg_index = 1;
+    }
+    void set_next_arg(cmd_context &ctx, unsigned num,
+                      func_decl *const *ts) override {
+        m_vars.append(num, ts);
+    }
+    void prepare(cmd_context &ctx) override {
+        m_arg_index = 0;
+        m_lits.reset();
+        m_vars.reset();
+    }
+    void execute(cmd_context &ctx) override {
+        ast_manager &m = ctx.m();
+        func_decl_ref_vector vars(m);
+        app_ref_vector vars_apps(m);
+        expr_ref_vector lits(m);
+
+        ctx.regular_stream() << "------------------------------ " << std::endl;
+
+        for (func_decl *v : m_vars) {
+            vars.push_back(v);
+            vars_apps.push_back(m.mk_const(v));
+        }
+        for (expr *e : m_lits) lits.push_back(e);
+
+        expr_ref fml(m.mk_and(lits), m);
+        ctx.regular_stream() << "[tg] Before: " << fml << std::endl
+                             << "[tg] Vars: ";
+        for (app *a : vars_apps) ctx.regular_stream() << app_ref(a, m) << " ";
+
+        ctx.regular_stream() << std::endl;
+
+        params_ref pa;
+
+        // the following is the same code as in qe_mbp in spacer
+        qel qe(m, pa);
+        qe(vars_apps, fml);
+        ctx.regular_stream() << "[tg] After: " << fml << std::endl
+                             << "[tg] Vars: ";
+        for (app *a : vars_apps) ctx.regular_stream() << app_ref(a, m) << " ";
+
+        ctx.regular_stream() << std::endl;
+    }
+};
+
+class qe_lite_cmd : public cmd {
+    unsigned m_arg_index;
+    ptr_vector<expr> m_lits;
+    ptr_vector<func_decl> m_vars;
+
+  public:
+    qe_lite_cmd() : cmd("qe-lite"){};
+    char const *get_usage() const override { return "(lits) (vars)"; }
+    char const *get_descr(cmd_context &ctx) const override {
+        return "QE lite over e-graphs";
+    }
+    unsigned get_arity() const override { return 2; }
+    cmd_arg_kind next_arg_kind(cmd_context &ctx) const override {
+        if (m_arg_index == 0) return CPK_EXPR_LIST;
+        return CPK_FUNC_DECL_LIST;
+    }
+    void set_next_arg(cmd_context &ctx, unsigned num,
+                      expr *const *args) override {
+        m_lits.append(num, args);
+        m_arg_index = 1;
+    }
+    void set_next_arg(cmd_context &ctx, unsigned num,
+                      func_decl *const *ts) override {
+        m_vars.append(num, ts);
+    }
+    void prepare(cmd_context &ctx) override {
+        m_arg_index = 0;
+        m_lits.reset();
+        m_vars.reset();
+    }
+    void execute(cmd_context &ctx) override {
+        ast_manager &m = ctx.m();
+        func_decl_ref_vector vars(m);
+        app_ref_vector vars_apps(m);
+        expr_ref_vector lits(m);
+
+        ctx.regular_stream() << "------------------------------ " << std::endl;
+
+        for (func_decl *v : m_vars) {
+            vars.push_back(v);
+            vars_apps.push_back(m.mk_const(v));
+        }
+        for (expr *e : m_lits) lits.push_back(e);
+
+        expr_ref fml(m.mk_and(lits), m);
+        ctx.regular_stream() << "[der] Before: " << fml << std::endl
+                             << "[der] Vars: ";
+        for (app *a : vars_apps) ctx.regular_stream() << app_ref(a, m) << " ";
+
+        ctx.regular_stream() << std::endl;
+
+        params_ref pa;
+        // the following is the same code as in qe_mbp in spacer
+        qe_lite qe(m, pa, false);
+        qe(vars_apps, fml);
+        ctx.regular_stream() << "[der] After: " << fml << std::endl
+                             << "[der] Vars: ";
+        for (app *a : vars_apps) ctx.regular_stream() << app_ref(a, m) << " ";
+
+        ctx.regular_stream() << std::endl;
+    }
+};
+
+void install_dbg_cmds(cmd_context &ctx) {
     ctx.insert(alloc(print_dimacs_cmd));
     ctx.insert(alloc(get_quantifier_body_cmd));
     ctx.insert(alloc(set_cmd));
@@ -581,7 +785,10 @@ void install_dbg_cmds(cmd_context & ctx) {
     ctx.insert(alloc(set_next_id));
     ctx.insert(alloc(get_interpolant_cmd));
     ctx.insert(alloc(mbp_cmd));
+    ctx.insert(alloc(mbp_qel_cmd));
     ctx.insert(alloc(mbi_cmd));
     ctx.insert(alloc(euf_project_cmd));
     ctx.insert(alloc(eufi_cmd));
+    ctx.insert(alloc(qel_cmd));
+    ctx.insert(alloc(qe_lite_cmd));
 }

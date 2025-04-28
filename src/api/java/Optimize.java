@@ -20,6 +20,8 @@ package com.microsoft.z3;
 
 import com.microsoft.z3.enumerations.Z3_lbool;
 
+import java.lang.ref.ReferenceQueue;
+
 
 /**
  * Object for managing optimization context
@@ -174,15 +176,26 @@ public class Optimize extends Z3Object {
      **/
     public Handle<?> AssertSoft(Expr<BoolSort> constraint, int weight, String group)
     {
+        return AssertSoft(constraint, Integer.toString(weight), group);
+    }
+    
+    /**
+     * Assert soft constraint
+     *
+     * Return an objective which associates with the group of constraints.
+     *
+     **/
+    public Handle<?> AssertSoft(Expr<BoolSort> constraint, String weight, String group)
+    {
         getContext().checkContextMatch(constraint);
         Symbol s = getContext().mkSymbol(group);
-        return new Handle<>(this, Native.optimizeAssertSoft(getContext().nCtx(), getNativeObject(), constraint.getNativeObject(), Integer.toString(weight), s.getNativeObject()));
+        return new Handle<>(this, Native.optimizeAssertSoft(getContext().nCtx(), getNativeObject(), constraint.getNativeObject(), weight, s.getNativeObject()));
     }
 
     /**
      * Check satisfiability of asserted constraints.
      * Produce a model that (when the objectives are bounded and 
-     * don't use strict inequalities) meets the objectives.
+     * don't use strict inequalities) is optimal.
      **/
     public Status Check(Expr<BoolSort>... assumptions)
     {
@@ -410,6 +423,18 @@ public class Optimize extends Z3Object {
 
     @Override
     void addToReferenceQueue() {
-        getContext().getOptimizeDRQ().storeReference(getContext(), this);
+        getContext().getReferenceQueue().storeReference(this, OptimizeRef::new);
+    }
+
+    private static class OptimizeRef extends Z3ReferenceQueue.Reference<Optimize> {
+
+        private OptimizeRef(Optimize referent, ReferenceQueue<Z3Object> q) {
+            super(referent, q);
+        }
+
+        @Override
+        void decRef(Context ctx, long z3Obj) {
+            Native.optimizeDecRef(ctx.nCtx(), z3Obj);
+        }
     }
 }

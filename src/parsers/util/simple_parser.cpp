@@ -17,6 +17,7 @@ Revision History:
 
 --*/
 #include<fstream>
+#include<iostream>
 #include<sstream>
 #include "parsers/util/simple_parser.h"
 #include "util/warning.h"
@@ -25,9 +26,6 @@ Revision History:
 simple_parser::simple_parser(ast_manager & m):
     m_manager(m),
     m_exprs(m) {
-}
-
-simple_parser::~simple_parser() {
 }
 
 void simple_parser::add_builtin_op(symbol const & s, family_id fid, decl_kind kind) {

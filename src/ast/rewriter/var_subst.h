@@ -48,6 +48,7 @@ public:
        Otherwise, (VAR 0) is stored in the first position, (VAR 1) in the second, and so on.
     */
     expr_ref operator()(expr * n, unsigned num_args, expr * const * args);
+    inline expr_ref operator()(expr* n, expr* arg) { return (*this)(n, 1, &arg); }
     inline expr_ref operator()(expr * n, expr_ref_vector const& args) { return (*this)(n, args.size(), args.data()); }
     inline expr_ref operator()(expr * n, var_ref_vector const& args) { return (*this)(n, args.size(), (expr*const*)args.data()); }
     inline expr_ref operator()(expr * n, app_ref_vector const& args) { return (*this)(n, args.size(), (expr*const*)args.data()); }
@@ -93,7 +94,7 @@ class expr_free_vars {
     ptr_vector<sort> m_sorts;
     ptr_vector<expr> m_todo;
 public:
-    expr_free_vars() {}
+    expr_free_vars() = default;
     expr_free_vars(expr* e) { (*this)(e); }
     void reset();
     void operator()(expr* e);

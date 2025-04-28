@@ -34,6 +34,7 @@ namespace qe {
 
     class i_nnf_atom {
     public:
+        virtual ~i_nnf_atom() = default;
         virtual void operator()(expr* e, bool pol, expr_ref& result) = 0;
     };
 
@@ -122,7 +123,6 @@ namespace qe {
             iterator(conj_enum& c, bool first) : m_super(&c), m_index(first?0:c.m_conjs.size()) {}
             expr* operator*() { return m_super->m_conjs[m_index].get(); }
             iterator& operator++() { m_index++; return *this; }
-            bool operator==(iterator const& it) const { return m_index == it.m_index; }
             bool operator!=(iterator const& it) const { return m_index != it.m_index; }
         };
 
@@ -148,7 +148,7 @@ namespace qe {
             m_ctx(ctx)
         {}
         
-        virtual ~qe_solver_plugin() {}
+        virtual ~qe_solver_plugin() = default;
         
         family_id get_family_id() { return m_fid; }
 

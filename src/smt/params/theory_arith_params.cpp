@@ -34,17 +34,19 @@ void theory_arith_params::updt_params(params_ref const & _p) {
     m_arith_int_eq_branching = p.arith_int_eq_branch();
     m_arith_ignore_int = p.arith_ignore_int();
     m_arith_bound_prop = static_cast<bound_prop_mode>(p.arith_propagation_mode());
-    m_arith_dump_lemmas = p.arith_dump_lemmas();
-    m_arith_reflect = p.arith_reflect();
     m_arith_eager_eq_axioms = p.arith_eager_eq_axioms();
     m_arith_auto_config_simplex = p.arith_auto_config_simplex();
+    m_arith_validate = p.arith_validate();
+    m_nl_arith_propagate_linear_monomials = p.arith_nl_propagate_linear_monomials();
+    m_nl_arith_optimize_bounds = p.arith_nl_optimize_bounds();
+    m_nl_arith_cross_nested = p.arith_nl_cross_nested();
 
     arith_rewriter_params ap(_p);
     m_arith_eq2ineq = ap.eq2ineq();
 }
 
 
-#define DISPLAY_PARAM(X) out << #X"=" << X << std::endl;
+#define DISPLAY_PARAM(X) out << #X"=" << X << '\n';
 
 void theory_arith_params::display(std::ostream & out) const {
     DISPLAY_PARAM(m_arith_eq2ineq);
@@ -68,7 +70,6 @@ void theory_arith_params::display(std::ostream & out) const {
     DISPLAY_PARAM(m_arith_adaptive);
     DISPLAY_PARAM(m_arith_adaptive_assertion_threshold);
     DISPLAY_PARAM(m_arith_adaptive_propagation_threshold);
-    DISPLAY_PARAM(m_arith_dump_lemmas);
     DISPLAY_PARAM(m_arith_eager_eq_axioms);
     DISPLAY_PARAM(m_arith_branch_cut_ratio);
     DISPLAY_PARAM(m_arith_int_eq_branching);
@@ -92,4 +93,8 @@ void theory_arith_params::display(std::ostream & out) const {
     DISPLAY_PARAM(m_nl_arith_max_degree);
     DISPLAY_PARAM(m_nl_arith_branching);
     DISPLAY_PARAM(m_nl_arith_rounds);
+    DISPLAY_PARAM(m_nl_arith_propagate_linear_monomials);
+    DISPLAY_PARAM(m_nl_arith_optimize_bounds);
+    DISPLAY_PARAM(m_nl_arith_cross_nested);
+    DISPLAY_PARAM(m_arith_validate);
 }

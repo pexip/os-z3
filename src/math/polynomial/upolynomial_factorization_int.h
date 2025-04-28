@@ -64,7 +64,7 @@ namespace upolynomial {
         
     public:
 
-        factorization_degree_set() { }
+        factorization_degree_set() = default;
 
         factorization_degree_set(zp_factors const & factors)
         {
@@ -85,7 +85,7 @@ namespace upolynomial {
 
         unsigned max_degree() const { return m_set.size() - 1; }
 
-        void swap(factorization_degree_set & other) {
+        void swap(factorization_degree_set & other) noexcept {
             m_set.swap(other.m_set);
         }
 
@@ -174,6 +174,8 @@ namespace upolynomial {
             m_current.resize(m_factors.distinct_factors()+1, m_factors.distinct_factors());
             m_current_size = 0;
         }
+
+        virtual ~factorization_combination_iterator_base() = default;
 
         /**
            \brief Returns the factors we are enumerating through.

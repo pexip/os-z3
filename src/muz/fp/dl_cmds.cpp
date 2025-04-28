@@ -56,8 +56,7 @@ struct dl_context {
         m_cmd(ctx),
         m_collected_cmds(collected_cmds),
         m_ref_count(0),
-        m_decl_plugin(nullptr),
-        m_trail() {}
+        m_decl_plugin(nullptr) {}
 
     void inc_ref() {
         ++m_ref_count;
@@ -226,7 +225,7 @@ public:
     void set_next_arg(cmd_context & ctx, func_decl* t) override {
         m_target = t;
         if (t->get_family_id() != null_family_id) {
-            throw cmd_exception("Invalid query argument, expected uinterpreted function name, but argument is interpreted");
+            throw cmd_exception("Invalid query argument, expected uninterpreted function name, but argument is interpreted");
         }
         datalog::context& dlctx = m_dl_ctx->dlctx();
         if (!dlctx.get_predicates().contains(t)) {

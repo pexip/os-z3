@@ -21,10 +21,6 @@ Revision History:
 #include "util/z3_exception.h"
 
 template<bool SYNCH>
-mpq_manager<SYNCH>::mpq_manager() {
-}
-
-template<bool SYNCH>
 mpq_manager<SYNCH>::~mpq_manager() {
     del(m_tmp1);
     del(m_tmp2);
@@ -260,6 +256,7 @@ void mpq_manager<SYNCH>::set(mpq & a, char const * val) {
             if (exp > 0) {
                 _scoped_numeral<mpq_manager<SYNCH>> _exp(*this);
                 _scoped_numeral<mpq_manager<SYNCH>> _qten(*this);
+                _qten = 10;
                 power(_qten, static_cast<unsigned>(exp), _exp);
                 TRACE("mpq_set", tout << "a: " << to_string(a) << ", exp_sign:" << exp_sign << ", exp: " << exp << " " << to_string(_exp) << std::endl;);
                 if (exp_sign)
@@ -319,6 +316,12 @@ unsigned mpq_manager<SYNCH>::prev_power_of_two(mpq const & a) {
     return prev_power_of_two(_tmp);
 }
 
+template<bool SYNCH>
+unsigned mpq_manager<SYNCH>::next_power_of_two(mpq const & a) {
+    _scoped_numeral<mpz_manager<SYNCH> > _tmp(*this);
+    ceil(a, _tmp);
+    return next_power_of_two(_tmp);
+}
 
 template<bool SYNCH>
 template<bool SUB>

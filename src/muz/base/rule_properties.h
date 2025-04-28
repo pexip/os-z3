@@ -44,7 +44,7 @@ namespace datalog {
         bool          m_generate_proof;
         rule*         m_rule;
         obj_map<quantifier, rule*> m_quantifiers;
-        obj_map<func_decl, rule*>  m_uninterp_funs;
+        obj_map<func_decl, rule*> m_uninterp_funs;
         ptr_vector<rule>           m_interp_pred;
         ptr_vector<rule>           m_negative_rules;
         ptr_vector<rule>           m_inf_sort;
@@ -55,9 +55,9 @@ namespace datalog {
         void check_sort(sort* s);
         void visit_rules(expr_sparse_mark& visited, rule_set const& rules);
         bool evaluates_to_numeral(expr * n, rational& val);
+        bool check_accessor(app* n);
     public:
         rule_properties(ast_manager & m, rule_manager& rm, context& ctx, i_expr_pred& is_predicate);
-        ~rule_properties();    
         void set_generate_proof(bool generate_proof) { m_generate_proof = generate_proof; } 
         void collect(rule_set const& r);
         void check_quantifier_free();
@@ -67,6 +67,7 @@ namespace datalog {
         void check_for_negated_predicates();
         void check_nested_free();
         void check_infinite_sorts();
+        void check_background_free();
         bool is_monotone() { return m_is_monotone; }
         void operator()(var* n);
         void operator()(quantifier* n);

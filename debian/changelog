@@ -1,3 +1,32 @@
+z3 (4.13.3-1) unstable; urgency=medium
+
+  * Non-maintainer upload.
+  * New upstream release
+
+  [ Helmut Grohne ]
+  * Improve cross building. (Closes: #1086731)
+    + Multiarchify python3 dependency.
+  * Add nopython build profile.
+    + Conditionalize debhelper addons via Build-Depends.
+    + Let debhelper conditionalize --link-doc based on profiles.
+    + Unconditional python3-setuptools dependency needed even with <!nopython>.
+  * Tighten libz3-java -> libz3-dev dependency for doc linking.
+
+ -- Sylvestre Ledru <sylvestre@debian.org>  Mon, 04 Nov 2024 22:19:18 +0100
+
+z3 (4.8.12-3.2) unstable; urgency=medium
+
+  * Non-maintainer upload.
+  * Fix FTBFS on mips64el (Closes: #1086725)
+    Thanks to Adrian Bunk for the patch
+  * Fix hurd-amd64 build (Closes: #1055476)
+    Thanks to Samuel Thibault for the patch
+  * Update standards version to 4.6.2, no changes needed.
+    Avoid explicitly specifying -Wl,--as-needed linker flag.
+  * Standards-Version: 4.7.0
+
+ -- Sylvestre Ledru <sylvestre@debian.org>  Mon, 04 Nov 2024 20:47:25 +0100
+
 z3 (4.8.12-3.1+pexip24u1) pexip; urgency=medium
 
   * Prepare Pexip packaging

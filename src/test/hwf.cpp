@@ -19,6 +19,7 @@ Revision History:
 #include "util/hwf.h"
 #include "util/f2n.h"
 #include "util/rational.h"
+#include <iostream>
 
 static void bug_set_double() {
     hwf_manager m;
@@ -102,7 +103,9 @@ static void bug_to_rational() {
 
 static void bug_is_int() {
     unsigned raw_val[2] = { 2147483648u, 1077720461u };
-    double   val = *(double*)(raw_val);
+    double   val;
+    static_assert(sizeof(raw_val) == sizeof(val));
+    memcpy(&val, raw_val, sizeof(val));
     std::cout << val << "\n";
     hwf_manager m;
     hwf a;

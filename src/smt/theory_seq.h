@@ -134,7 +134,6 @@ namespace smt {
             unsigned_vector                   m_limit;
         public:
             exclusion_table(ast_manager& m): m(m), m_lhs(m), m_rhs(m) {}
-            ~exclusion_table() { }
             bool empty() const { return m_table.empty(); }
             void update(expr* e, expr* r);
             bool contains(expr* e, expr* r) const;
@@ -222,7 +221,7 @@ namespace smt {
 
         class apply {
         public:
-            virtual ~apply() {}
+            virtual ~apply() = default;
             virtual void operator()(theory_seq& th) = 0;
         };
 
@@ -230,7 +229,6 @@ namespace smt {
             expr_ref m_e;
         public:
             replay_length_coherence(ast_manager& m, expr* e) : m_e(e, m) {}
-            ~replay_length_coherence() override {}
             void operator()(theory_seq& th) override {
                 th.check_length_coherence(m_e);
                 m_e.reset();
@@ -241,9 +239,8 @@ namespace smt {
             expr_ref m_e;
         public:
             replay_fixed_length(ast_manager& m, expr* e) : m_e(e, m) {}
-            ~replay_fixed_length() override {}
             void operator()(theory_seq& th) override {
-                th.fixed_length(m_e);
+                th.fixed_length(m_e, false, false);
                 m_e.reset();
             }
         };
@@ -252,7 +249,6 @@ namespace smt {
             expr_ref m_e;
         public:
             replay_axiom(ast_manager& m, expr* e) : m_e(e, m) {}
-            ~replay_axiom() override {}
             void operator()(theory_seq& th) override {
                 th.enque_axiom(m_e);
                 m_e.reset();
@@ -264,7 +260,6 @@ namespace smt {
             bool     m_sign;
         public:
             replay_unit_literal(ast_manager& m, expr* e, bool sign) : m_e(e, m), m_sign(sign) {}
-            ~replay_unit_literal() override {}
             void operator()(theory_seq& th) override {
                 literal lit = th.mk_literal(m_e);
                 if (m_sign) lit.neg();
@@ -278,7 +273,6 @@ namespace smt {
             expr_ref m_e;
         public:
             replay_is_axiom(ast_manager& m, expr* e) : m_e(e, m) {}
-            ~replay_is_axiom() override {}
             void operator()(theory_seq& th) override {
                 th.check_int_string(m_e);
                 m_e.reset();
@@ -333,6 +327,7 @@ namespace smt {
         scoped_vector<ne>          m_nqs;        // set of current disequalities.
         scoped_vector<nc>          m_ncs;        // set of non-contains constraints.
         scoped_vector<expr*>       m_lts;        // set of asserted str.<, str.<= literals
+        scoped_vector<expr*>       m_recfuns;    // set of recursive functions that are defined by unfolding seq argument (map/fold)
         bool                       m_lts_checked; 
         unsigned                   m_eq_id;
         th_union_find              m_find;
@@ -411,7 +406,8 @@ namespace smt {
         void init_model(model_generator & mg) override;
         void finalize_model(model_generator & mg) override;
         void init_search_eh() override;
-        void validate_model(model& mdl) override;
+        void validate_model(proto_model& mdl) override;
+        bool is_beta_redex(enode* p, enode* n) const override;
 
         void init_model(expr_ref_vector const& es);
         app* get_ite_value(expr* a);
@@ -436,8 +432,8 @@ namespace smt {
         bool check_length_coherence();
         bool check_length_coherence0(expr* e);
         bool check_length_coherence(expr* e);
-        bool fixed_length(bool is_zero = false);
-        bool fixed_length(expr* e, bool is_zero);
+        bool check_fixed_length(bool is_zero, bool check_long_strings);
+        bool fixed_length(expr* e, bool is_zero, bool check_long_strings);
         bool branch_variable_eq(depeq const& e);
         bool branch_binary_variable(depeq const& e);
         bool can_align_from_lhs(expr_ref_vector const& ls, expr_ref_vector const& rs);
@@ -458,6 +454,7 @@ namespace smt {
         void add_unhandled_expr(expr* e);
 
         bool check_extensionality();
+        bool check_extensionality(expr* e1, enode* n1, enode* n2);
         bool check_contains();
         bool check_lts();
         dependency* m_eq_deps { nullptr };
@@ -487,6 +484,7 @@ namespace smt {
         bool solve_nqs(unsigned i);
         bool solve_ne(unsigned i);
         bool solve_nc(unsigned i);
+        bool solve_recfuns();
         bool check_ne_literals(unsigned idx, unsigned& num_undef_lits);
         bool propagate_ne2lit(unsigned idx);
         bool propagate_ne2eq(unsigned idx);

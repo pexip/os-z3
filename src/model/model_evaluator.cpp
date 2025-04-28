@@ -18,7 +18,9 @@ Revision History:
 --*/
 #include "ast/ast_pp.h"
 #include "ast/ast_util.h"
+#include "ast/for_each_expr.h"
 #include "ast/recfun_decl_plugin.h"
+#include "ast/polymorphism_util.h"
 #include "ast/rewriter/rewriter_types.h"
 #include "ast/rewriter/bool_rewriter.h"
 #include "ast/rewriter/arith_rewriter.h"
@@ -31,6 +33,7 @@ Revision History:
 #include "ast/rewriter/th_rewriter.h"
 #include "ast/rewriter/rewriter_def.h"
 #include "ast/rewriter/var_subst.h"
+#include "ast/rewriter/recfun_rewriter.h"
 #include "model/model_smt2_pp.h"
 #include "model/model.h"
 #include "model/model_evaluator_params.hpp"
@@ -52,6 +55,7 @@ struct evaluator_cfg : public default_rewriter_cfg {
     pb_rewriter                     m_pb_rw;
     fpa_rewriter                    m_f_rw;
     seq_rewriter                    m_seq_rw;
+    recfun_rewriter                 m_rec_rw;
     array_util                      m_ar;
     arith_util                      m_au;
     fpa_util                        m_fpau;
@@ -79,13 +83,14 @@ struct evaluator_cfg : public default_rewriter_cfg {
         m_pb_rw(m),
         m_f_rw(m),
         m_seq_rw(m),
+        m_rec_rw(m),
         m_ar(m),
         m_au(m),
         m_fpau(m),
         m_dt(m),
         m_pinned(m) {
         bool flat = true;
-        m_b_rw.set_flat(flat);
+        m_b_rw.set_flat_and_or(flat);
         m_a_rw.set_flat(flat);
         m_bv_rw.set_flat(flat);
         m_bv_rw.set_mkbv2num(true);
@@ -150,11 +155,44 @@ struct evaluator_cfg : public default_rewriter_cfg {
     br_status reduce_app(func_decl * f, unsigned num, expr * const * args, expr_ref & result, proof_ref & result_pr) {
         auto st = reduce_app_core(f, num, args, result, result_pr);
         CTRACE("model_evaluator", st != BR_FAILED, 
-               tout << f->get_name() << "\n";
-               for (unsigned i = 0; i < num; ++i) tout << mk_pp(args[i], m) << "\n";
-               tout << result << "\n";);
+               tout << st << " " << mk_pp(f, m) << "  ";
+               for (unsigned i = 0; i < num; ++i) tout << mk_pp(args[i], m) << " ";
+               tout << "\n--> " << result << "\n";);
                
         return st;
+    }
+
+    bool contains_redex(expr* e) {
+        if (m_ar.is_as_array(e))
+            return true;
+        if (is_var(e))
+            return false;
+        if (is_app(e) && to_app(e)->get_num_args() == 0)
+            return false;
+
+        struct has_redex {};
+        struct has_redex_finder {
+            evaluator_cfg& ev;
+            has_redex_finder(evaluator_cfg& ev): ev(ev) {}
+            void operator()(var* v) {}
+            void operator()(quantifier* q) {}
+            void operator()(app* a) {
+                if (ev.m_ar.is_as_array(a->get_decl()))
+                    throw has_redex();
+                if (ev.m_ar.get_manager().is_eq(a))
+                    throw has_redex();
+                if (ev.m_fpau.is_fp(a))
+                    throw has_redex();
+            }
+        };
+        has_redex_finder ha(*this);
+        try {
+            for_each_expr(ha, e);
+        }
+        catch (has_redex) {
+            return true;
+        }
+        return false;
     }
 
     br_status reduce_app_core(func_decl * f, unsigned num, expr * const * args, expr_ref & result, proof_ref & result_pr) {
@@ -171,12 +209,20 @@ struct evaluator_cfg : public default_rewriter_cfg {
         };
         pp _pp(f, result);
 #endif
-        if (num == 0 && (fid == null_family_id || _is_uninterp || m_ar.is_as_array(f))) {
-            expr * val = m_model.get_const_interp(f);
+
+
+        func_decl* g = nullptr;
+        if (num == 0 && m_ar.is_as_array(f, g)) {
+            auto* fi = m_model.get_func_interp(g);
+            if (fi && (result = fi->get_array_interp(g))) 
+                return BR_REWRITE1;
+        }
+        if (num == 0 && (fid == null_family_id || _is_uninterp)) {
+            expr* val = m_model.get_const_interp(f);
             if (val != nullptr) {
                 result = val;
-                st = m_ar.is_as_array(val) ? BR_REWRITE1 : BR_DONE;
-                TRACE("model_evaluator", tout << result << "\n";);
+                st = contains_redex(val) ? BR_REWRITE_FULL : BR_DONE;
+                TRACE("model_evaluator", tout << st << " " << result << "\n";);
                 return st;
             }
             if (!m_model_completion)
@@ -189,6 +235,7 @@ struct evaluator_cfg : public default_rewriter_cfg {
                 result = val;
                 return BR_DONE;
             }
+
             // fall through
         }
 
@@ -223,6 +270,11 @@ struct evaluator_cfg : public default_rewriter_cfg {
                 if (st != BR_FAILED)
                     return st;
             }
+            if (k == OP_AND) {
+                st = m_a_rw.mk_and_core(num, args, result);
+                if (st != BR_FAILED)
+                    return st;
+            }
             return m_b_rw.mk_app_core(f, num, args, result);
         }
         if (fid == m_a_rw.get_fid())
@@ -239,44 +291,62 @@ struct evaluator_cfg : public default_rewriter_cfg {
             st = m_f_rw.mk_app_core(f, num, args, result);
         else if (fid == m_seq_rw.get_fid())
             st = m_seq_rw.mk_app_core(f, num, args, result);
+        else if (fid == m_rec_rw.get_fid())
+            st = m_rec_rw.mk_app_core(f, num, args, result);
         else if (fid == m.get_label_family_id() && num == 1) {
             result = args[0];
             st = BR_DONE;
         }
-        else if (evaluate(f, num, args, result)) {
-            st = BR_REWRITE1;
-        }
-        if (st == BR_FAILED && !m.is_builtin_family_id(fid)) {
-            st = evaluate_partial_theory_func(f, num, args, result, result_pr);
-        }
+        else if (evaluate(f, num, args, result)) 
+            st = BR_REWRITE1;        
+        if (st == BR_FAILED && !m.is_builtin_family_id(fid)) 
+            st = evaluate_partial_theory_func(f, num, args, result, result_pr);        
         if (st == BR_DONE && is_app(result)) {
             app* a = to_app(result);
-            if (evaluate(a->get_decl(), a->get_num_args(), a->get_args(), result)) {
-                st = BR_REWRITE1;
-            }
-        }
-        if (st == BR_FAILED && num == 0 && m_ar.is_as_array(f) && m_model_completion) {
-            func_decl* g = nullptr;
-            VERIFY(m_ar.is_as_array(f, g));
-            expr* def = nullptr;
-            if (m_def_cache.find(g, def)) {
-                result = def;
-                TRACE("model_evaluator", tout << result << "\n";);
-                return BR_DONE;
-            }
-            func_interp * fi = m_model.get_func_interp(g);
-            if (fi && (result = fi->get_array_interp(g))) {
-                model_evaluator ev(m_model, m_params);
-                ev.set_model_completion(false);
-                result = ev(result);
-                m_pinned.push_back(result);
-                m_def_cache.insert(g, result);
-                TRACE("model_evaluator", tout << mk_pp(g, m) << " " << result << "\n";);
-                return BR_DONE;
-            }
+            if (evaluate(a->get_decl(), a->get_num_args(), a->get_args(), result))
+                st = BR_REWRITE1;              
         }
 
+        if (st == BR_DONE && is_app(result) && expand_as_array(to_app(result)->get_decl(), result))
+            return BR_REWRITE_FULL;
+
+        if (st == BR_FAILED && expand_as_array(f, result))
+            return BR_REWRITE_FULL;        
         return st;
+    }
+
+    bool expand_as_array(func_decl* f, expr_ref& result) {
+        if (!m_model_completion)
+            return false;
+        func_decl* g = nullptr;
+        if (!m_ar.is_as_array(f, g))
+            return false;
+        expr* def = nullptr;
+        if (m_def_cache.find(g, def)) {
+            result = def;
+            TRACE("model_evaluator", tout << result << "\n";);
+            return true;
+        }
+        expr_ref tmp(m);
+        func_interp* fi = m_model.get_func_interp(g);
+        if (fi && !fi->get_else()) {
+            fi->set_else(m_model.get_some_value(g->get_range()));
+        }
+        if (fi && (tmp = fi->get_array_interp(g))) {
+            model_evaluator ev(m_model, m_params);
+            ev.set_model_completion(false);
+            result = ev(tmp);
+            m_pinned.push_back(result);
+            m_def_cache.insert(g, result);
+            TRACE("model_evaluator", tout << mk_pp(g, m) << " " << result << "\n";);
+            return true;
+        }
+        
+        TRACE("model_evaluator",
+            tout << "could not get array interpretation " << mk_pp(g, m) << " " << fi << "\n";
+            tout << m_model << "\n";);                    
+
+        return false;
     }
 
     void expand_stores(expr_ref& val) {
@@ -304,7 +374,7 @@ struct evaluator_cfg : public default_rewriter_cfg {
     bool get_macro(func_decl * f, expr * & def, quantifier * & , proof * &) {
         func_interp * fi = m_model.get_func_interp(f);
         def = nullptr;
-        if (fi != nullptr) {
+        if (fi) {
             if (fi->is_partial()) {
                 if (m_model_completion) {
                     sort * s   = f->get_range();
@@ -316,6 +386,24 @@ struct evaluator_cfg : public default_rewriter_cfg {
             }
             def = fi->get_interp();
             SASSERT(def != nullptr);
+        }
+        else if (f->is_polymorphic() && (fi = m_model.get_func_interp(m.poly_root(f)))) {
+            if (fi->is_partial()) {
+                if (m_model_completion) {
+                    sort * s   = f->get_range();
+                    expr * val = m_model.get_some_value(s);
+                    fi->set_else(val);
+                }
+                else
+                    return false;
+            }
+            def = fi->get_interp();
+            polymorphism::substitution subst(m);
+            polymorphism::util util(m);
+            util.unify(f, m.poly_root(f), subst);
+            def = subst(def);
+            SASSERT(def != nullptr);
+            
         }
         else if (m_model_completion &&
             (f->get_family_id() == null_family_id ||
@@ -361,14 +449,43 @@ struct evaluator_cfg : public default_rewriter_cfg {
                 return BR_DONE;
             }
         }
+        else if (!fi && m_au.is_considered_partially_interpreted(f, num, args, f_ui)) {
+            fi = m_model.get_func_interp(f_ui);
+                            
+            if (fi) {
+                auto interp = fi->get_interp();
+                if (interp) {
+                    var_subst vs(m, false);
+                    result = vs(fi->get_interp(), num, args);
+                    result = m.mk_ite(m.mk_eq(m_au.mk_numeral(rational(0), args[1]->get_sort()), args[1]), result, m.mk_app(f, num, args));
+                    return BR_DONE;
+                }
+            }
+        }
         else if (!fi && m_fpau.is_considered_uninterpreted(f, num, args)) {
             result = m.get_some_value(f->get_range());
             return BR_DONE;
         }
-        else if (m_dt.is_accessor(f) && !is_ground(args[0])) {
-            result = m.mk_app(f, num, args);
-            return BR_DONE;            
+        else if (m_dt.is_accessor(f)) {
+            expr* arg = args[0];
+            if (m.is_value(arg) && !fi) {
+                fi = alloc(func_interp, m, f->get_arity());
+                expr* val = m_model.get_some_value(f->get_range());
+                fi->set_else(val);
+                m_model.register_decl(f, fi);
+                result = val;
+                return BR_DONE;
+            }
+            if (!is_ground(arg)) {
+                result = m.mk_app(f, num, args);
+                return BR_DONE;
+            }
         }
+        else if (m_dt.is_constructor(f)) {
+            result = m.mk_app(f, num, args);
+            return BR_DONE;
+        }
+
         if (fi) {
             if (fi->is_partial())
                 fi->set_else(m.get_some_value(f->get_range()));
@@ -391,8 +508,7 @@ struct evaluator_cfg : public default_rewriter_cfg {
     }
 
     br_status mk_array_eq(expr* a, expr* b, expr_ref& result) {
-        TRACE("model_evaluator", tout << "mk_array_eq " << m_array_equalities << " " 
-              << mk_pp(a, m) << " " << mk_pp(b, m) << "\n";);
+
         if (a == b) {
             result = m.mk_true();
             return BR_DONE;
@@ -400,6 +516,8 @@ struct evaluator_cfg : public default_rewriter_cfg {
         if (!m_array_equalities) {
             return m_ar_rw.mk_eq_core(a, b, result);
         }
+        TRACE("model_evaluator", tout << "mk_array_eq " << m_array_equalities << " "
+            << mk_pp(a, m) << " " << mk_pp(b, m) << "\n";);
 
         vector<expr_ref_vector> stores1, stores2;
         bool args_are_unique1, args_are_unique2;
@@ -546,14 +664,13 @@ struct evaluator_cfg : public default_rewriter_cfg {
 
     bool extract_array_func_interp(expr* a, vector<expr_ref_vector>& stores, expr_ref& else_case, bool& are_unique) {
         SASSERT(m_ar.is_array(a));
-        bool are_values = true;
         are_unique = true;
         TRACE("model_evaluator", tout << mk_pp(a, m) << "\n";);
 
         while (m_ar.is_store(a)) {
             expr_ref_vector store(m);
             store.append(to_app(a)->get_num_args()-1, to_app(a)->get_args()+1);
-            are_values &= args_are_values(store, are_unique);
+            args_are_values(store, are_unique);
             stores.push_back(store);
             a = to_app(a)->get_arg(0);
         }
@@ -564,9 +681,8 @@ struct evaluator_cfg : public default_rewriter_cfg {
         }
 
         if (m_ar_rw.has_index_set(a, else_case, stores)) {
-            for (auto const& store : stores) {
-                are_values &= args_are_values(store, are_unique);
-            }
+            for (auto const& store : stores) 
+                args_are_values(store, are_unique);
             return true;
         }
         if (!m_ar.is_as_array(a)) {
@@ -689,11 +805,10 @@ void model_evaluator::operator()(expr * t, expr_ref & result) {
     TRACE("model_evaluator", tout << mk_ismt2_pp(t, m()) << "\n";);
     m_imp->operator()(t, result);
     m_imp->expand_stores(result);
-    TRACE("model_evaluator", tout << result << "\n";);
+    TRACE("model_evaluator", tout << "eval: " << mk_ismt2_pp(t, m()) << " --> " << result << "\n";);
 }
 
 expr_ref model_evaluator::operator()(expr * t) {
-    TRACE("model_evaluator", tout << mk_ismt2_pp(t, m()) << "\n";);
     expr_ref result(m());
     this->operator()(t, result);
     return result;
